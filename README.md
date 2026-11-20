@@ -1,4 +1,4 @@
-# GitHub Codespaces ♥️ React
+# KelolaUsaha.store
 
 Welcome to your shiny new Codespace running React! We've got everything fired up and running for you to explore React.
 
@@ -68,3 +68,24 @@ This section has moved here: [https://vitejs.dev/guide/build.html](https://vitej
 ### Troubleshooting
 
 This section has moved here: [https://vitejs.dev/guide/troubleshooting.html](https://vitejs.dev/guide/troubleshooting.html)
+
+## Server, trial, and Midtrans
+
+The public root URL is a marketing site with feature coverage, supported business examples, package prices, and calls to register. The authenticated console is for the KelolaUsaha.store platform owner; its public preview uses clearly labelled sample data. The prior organization structure is offered as the `dealer_motor` workspace type; tenant registration starts with that type selected.
+
+The API uses PostgreSQL. Copy `.env.example` to `.env`, configure a database, a random `SESSION_SECRET`, the platform owner's email, SMTP, and Midtrans Sandbox credentials. Do not put SMTP or Midtrans secrets in frontend variables.
+
+```sh
+npm run db:migrate
+npm run start:full
+```
+
+`npm run start:full` runs the Vite app on port 3000 and the API on port 4000; Vite proxies `/api` to the API. Apply the migration before starting. Production must serve the API and frontend on one origin (or configure an equivalent same-origin reverse proxy), use HTTPS, and set `MIDTRANS_ENV=production` only after configuring live Midtrans credentials.
+
+New workspaces receive a one-calendar-month trial. Available activation packages are Rp299.000/1 month, Rp749.000/3 months, Rp1.399.000/6 months, Rp2.499.000/12 months, and Rp5.900.000/Lifetime. The backend fixes these amounts and creates Snap transactions; only a valid Midtrans notification signature and a successful settlement/capture activate a package. Configure the Midtrans payment notification URL to `/api/billing/midtrans-webhook`.
+
+The platform owner email configured by `PLATFORM_OWNER_EMAIL` signs in through email OTP and sees workspace counts, statuses, owners, users, and paid totals. Tenant Super Admins can choose packages and view their trial/activation status. An in-app reminder is recorded in the last three days and a final expiration notice is recorded when the period ends. Billing/order/notification data are persisted in PostgreSQL.
+
+Tenant Super Admins and Owners can customize the dashboard from **Pengaturan → Tampilan Dashboard**. Ten palettes are available (Biru Profesional is the default); theme, custom colors, light/dark mode, sidebar density, card style, logo, and favicon are stored per company in `companies.theme_settings`. Logo and favicon uploads are restricted to recognized image types up to 2 MB. Set `UPLOAD_DIR` to persistent storage in production.
+
+Required deployment secrets/services: PostgreSQL `DATABASE_URL`, `SESSION_SECRET`, SMTP credentials, `PLATFORM_OWNER_EMAIL`, and Midtrans `MIDTRANS_SERVER_KEY`. The payment flow cannot be exercised against live Midtrans until these are configured; use Sandbox for verification first.
