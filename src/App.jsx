@@ -513,7 +513,7 @@ function AuthScreen({ mode, onModeChange, onBack, onAuthenticated }) {
       }}>← Kembali</a>
       <section className="auth-layout">
         <div className="auth-showcase">
-          <div className="auth-brand"><span className="auth-brand-mark">KU</span><span>KELOLAUSAHA.STORE</span></div>
+          <div className="auth-brand"><img className="auth-brand-mark" src="/kelolausaha-mark.svg" alt="" /><span>KELOLAUSAHA.STORE</span></div>
           <div className="auth-showcase-content">
             <span className="auth-kicker"><span /> WORKSPACE UNTUK USAHA</span>
             <h1>Semua urusan usaha,<br /><em>lebih mudah.</em></h1>
@@ -532,7 +532,7 @@ function AuthScreen({ mode, onModeChange, onBack, onAuthenticated }) {
         </div>
 
         <div className="auth-form-side">
-          <div className="auth-mobile-brand"><span className="auth-brand-mark">KU</span><strong>KELOLAUSAHA.STORE</strong></div>
+          <div className="auth-mobile-brand"><img className="auth-brand-mark" src="/kelolausaha-mark.svg" alt="" /><strong>KELOLAUSAHA.STORE</strong></div>
           <div className="auth-form-wrap" key={`${mode}-${otpRequested}-${isEmployeeInvite}`}>
             <div className="auth-welcome-icon">{otpRequested ? '✉' : isRegister ? '✳' : '↗'}</div>
             <span className="auth-overline">{otpRequested ? 'VERIFIKASI EMAIL' : isRegister ? 'MULAI KELOLA USAHA' : 'SELAMAT DATANG KEMBALI'}</span>
@@ -1129,7 +1129,7 @@ function App() {
     >
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark">{themeSettings.logoUrl ? <img alt={`${workspaceName} logo`} src={themeSettings.logoUrl} /> : 'KU'}</div>
+          <div className="brand-mark"><img alt={`${workspaceName} logo`} src={themeSettings.logoUrl || '/kelolausaha-mark.svg'} /></div>
           <div className="brand-copy">
             <strong>KELOLAUSAHA</strong>
             <span>Workspace usaha</span>

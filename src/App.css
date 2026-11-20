@@ -329,7 +329,7 @@ td .spk-id { color: #316d50; font-size: 9px; }
 .auth-showcase { position: relative; display: flex; flex-direction: column; overflow: hidden; padding: 31px 38px 23px; color: #f3f8f3; background: radial-gradient(ellipse at 70% 83%, #276a4b 0, transparent 40%), linear-gradient(145deg, #163d30, #102d25 75%); }
 .auth-showcase::before { position: absolute; inset: 0; background-image: radial-gradient(#ffffff12 .8px, transparent .8px); background-size: 17px 17px; content: ""; opacity: .35; mask-image: linear-gradient(120deg, #000, transparent 72%); }
 .auth-brand { position: relative; display: flex; align-items: center; gap: 10px; color: #e3efe6; font-size: 9px; font-weight: 700; letter-spacing: 1px; }
-.auth-brand-mark { display: grid; width: 36px; height: 36px; place-items: center; border: 1px solid #7fa8908c; border-radius: 10px; color: #f1fbf2; background: #ffffff10; font-size: 10px; font-weight: 800; letter-spacing: .1px; }
+.auth-brand-mark { display: block; width: 38px; height: 38px; flex: 0 0 auto; border-radius: 10px; object-fit: contain; }
 .auth-showcase-content { position: relative; z-index: 1; margin: auto 0; padding: 26px 0 0; }
 .auth-kicker { display: inline-flex; align-items: center; gap: 7px; color: #a9c5b3; font-size: 8px; font-weight: 700; letter-spacing: 1.2px; }
 .auth-kicker > span { width: 6px; height: 6px; border-radius: 50%; background: #8dd29c; box-shadow: 0 0 12px #8dd29c; }
@@ -445,7 +445,7 @@ td .spk-id { color: #316d50; font-size: 9px; }
   .auth-layout { width: min(460px, 100%); min-height: 0; grid-template-columns: 1fr; border-radius: 13px; }
   .auth-showcase { display: none; }
   .auth-mobile-brand { display: flex; align-items: center; gap: 9px; margin-bottom: 24px; color: #315940; font-size: 8px; font-weight: 700; letter-spacing: .6px; }
-  .auth-mobile-brand .auth-brand-mark { width: 31px; height: 31px; border-color: #cfe2d2; color: #276843; background: #edf6ee; font-size: 9px; }
+  .auth-mobile-brand .auth-brand-mark { width: 31px; height: 31px; }
   .auth-form-side { padding: 25px 22px 24px; }
   .auth-form-wrap { width: 100%; }
   .auth-welcome-icon { margin-bottom: 15px; }

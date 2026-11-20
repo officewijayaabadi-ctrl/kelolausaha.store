@@ -13,12 +13,13 @@ afterEach(() => {
 });
 
 test('shows a public product site with platform features and activation prices', () => {
-  render(<App />);
+  const { container } = render(<App />);
   expect(screen.getByRole('heading', { name: /Kelola usaha lebih terarah/ })).toBeDefined();
   expect(screen.getByText('POS & kasir')).toBeDefined();
   expect(screen.getByText('Nota digital WhatsApp')).toBeDefined();
   expect(screen.getByText('Dealer motor')).toBeDefined();
   expect(screen.getByText(/5\.900\.000/)).toBeDefined();
+  expect(container.querySelector('.public-brand-mark img').getAttribute('src')).toBe('/kelolausaha-mark.svg');
 });
 
 test('previews the platform-owner console with clearly marked dealer-motor sample data', () => {

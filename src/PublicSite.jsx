@@ -32,7 +32,7 @@ function PublicSite({ onLogin, onRegister, onPreview, statusMessage }) {
     <main className="public-site">
       <header className="public-header">
         <a className="public-brand" href="#beranda" aria-label="KelolaUsaha.store beranda">
-          <span className="public-brand-mark">KU</span>
+          <span className="public-brand-mark"><img alt="" src="/kelolausaha-mark.svg" /></span>
           <span><strong>KELOLAUSAHA</strong><small>OPERASIONAL USAHA TERPADU</small></span>
         </a>
         <nav className="public-nav" aria-label="Navigasi website">
@@ -154,7 +154,7 @@ function PublicSite({ onLogin, onRegister, onPreview, statusMessage }) {
       </section>
 
       <footer className="public-footer">
-        <a className="public-brand" href="#beranda"><span className="public-brand-mark">KU</span><span><strong>KELOLAUSAHA</strong><small>OPERASIONAL USAHA TERPADU</small></span></a>
+        <a className="public-brand" href="#beranda"><span className="public-brand-mark"><img alt="" src="/kelolausaha-mark.svg" /></span><span><strong>KELOLAUSAHA</strong><small>OPERASIONAL USAHA TERPADU</small></span></a>
         <span>© 2026 KelolaUsaha.store. Hak cipta dilindungi.</span>
         <button onClick={onPreview} type="button">Pratinjau dashboard Owner</button>
       </footer>
