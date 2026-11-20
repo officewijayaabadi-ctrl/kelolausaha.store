@@ -1,6 +1,6 @@
-import { plans } from '../shared/plans.js';
+import { branchAddons, getBranchAddon, plans } from '../shared/plans.js';
 
-export { plans };
+export { branchAddons, getBranchAddon, plans };
 
 export function getPlan(planId) {
   return plans.find((plan) => plan.id === planId);

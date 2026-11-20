@@ -132,7 +132,7 @@ function PublicSite({ onLogin, onRegister, onPreview, statusMessage }) {
           <div className="public-section-heading">
             <span className="public-eyebrow">PAKET AKTIVASI</span>
             <h2>Mulai gratis, pilih paket<br /><em>saat siap melanjutkan.</em></h2>
-            <p>Setiap workspace baru mendapat demo selama satu bulan. Aktivasi dan pembayaran dilakukan oleh Super Admin.</p>
+            <p>Setiap workspace baru mendapat demo selama satu bulan. Aktivasi dan pembayaran dilakukan oleh Owner Usaha.</p>
           </div>
           <div className="public-price-grid">
             {plans.map((plan) => <article className={`public-price-card ${plan.featured ? 'price-featured' : ''}`} key={plan.id}>
@@ -141,7 +141,7 @@ function PublicSite({ onLogin, onRegister, onPreview, statusMessage }) {
               <button onClick={onRegister} type="button">Mulai demo <span>→</span></button>
             </article>)}
           </div>
-          <p className="public-payment-note">Pembayaran paket diproses melalui Midtrans setelah masuk ke akun Super Admin.</p>
+          <p className="public-payment-note">Owner Usaha dapat memilih paket dan melakukan pembayaran melalui Midtrans.</p>
         </div>
       </section>
 

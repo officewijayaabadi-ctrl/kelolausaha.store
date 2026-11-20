@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { addCalendarMonths, getPlan, plans, subscriptionStatus, trialEndsAt } from './plans.js';
+import { addCalendarMonths, getBranchAddon, getPlan, plans, branchAddons, subscriptionStatus, trialEndsAt } from './plans.js';
 
 describe('subscription plans', () => {
   test('uses the configured package prices', () => {
@@ -8,9 +8,21 @@ describe('subscription plans', () => {
       ['month_3', 749000],
       ['month_6', 1399000],
       ['year_1', 2499000],
-      ['lifetime', 5900000],
+      ['lifetime', 15000000],
     ]);
     expect(getPlan('unknown')).toBeUndefined();
+  });
+
+  test('calculates the configured per-branch add-on prices', () => {
+    expect(branchAddons.map(({ months, pricePerBranch }) => [months, pricePerBranch])).toEqual([
+      [1, 100000],
+      [3, 150000],
+      [6, 250000],
+      [12, 500000],
+      [0, 2000000],
+    ]);
+    expect(getBranchAddon(3)?.pricePerBranch).toBe(150000);
+    expect(getBranchAddon(2)).toBeNull();
   });
 
   test('adds calendar months without overflowing short months', () => {

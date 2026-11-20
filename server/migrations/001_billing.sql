@@ -80,3 +80,52 @@ CREATE TABLE IF NOT EXISTS billing_notifications (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   read_at TIMESTAMPTZ
 );
+
+CREATE TABLE IF NOT EXISTS company_ledger_entries (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  created_by UUID NOT NULL REFERENCES users(id),
+  entry_type TEXT NOT NULL CHECK (entry_type IN ('income', 'expense')),
+  category TEXT NOT NULL,
+  description TEXT NOT NULL,
+  amount BIGINT NOT NULL CHECK (amount > 0),
+  entry_date DATE NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS company_ledger_entries_company_date_idx
+  ON company_ledger_entries (company_id, entry_date DESC, created_at DESC);
+
+WITH first_admin AS (
+  SELECT DISTINCT ON (company_id) id
+  FROM users
+  WHERE role = 'SUPER ADMIN' AND company_id IS NOT NULL
+    AND NOT EXISTS (
+      SELECT 1 FROM users owner
+      WHERE owner.company_id = users.company_id AND owner.role = 'OWNER'
+    )
+  ORDER BY company_id, created_at, id
+)
+UPDATE users
+SET role = 'OWNER',
+    permissions = permissions || '["financeView","financeManage","activationManage","accessManage","themeManage"]'::jsonb
+WHERE id IN (SELECT id FROM first_admin);
+
+UPDATE users
+SET permissions = (
+  SELECT COALESCE(jsonb_agg(DISTINCT permission), '[]'::jsonb)
+  FROM jsonb_array_elements_text(
+    users.permissions || '["financeView","financeManage","activationManage","accessManage","themeManage"]'::jsonb
+  ) AS item(permission)
+)
+WHERE role = 'OWNER';
+
+UPDATE users
+SET permissions = COALESCE((
+  SELECT jsonb_agg(permission)
+  FROM jsonb_array_elements_text(users.permissions) AS item(permission)
+  WHERE permission NOT IN (
+    'reportsView', 'targetManage', 'financeView', 'financeManage',
+    'activationManage', 'accessManage', 'themeManage'
+  )
+), '[]'::jsonb)
+WHERE role = 'SUPER ADMIN';
