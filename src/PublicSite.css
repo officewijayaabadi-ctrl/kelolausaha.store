@@ -13,11 +13,7 @@
 .public-site button { cursor: pointer; }
 .public-header { position: relative; z-index: 2; display: flex; height: 75px; align-items: center; justify-content: space-between; gap: 20px; padding: 0 max(6.5vw, calc((100vw - 1200px) / 2)); border-bottom: 1px solid #f1e8e9; background: #ffffffed; }
 .public-brand { display: inline-flex; align-items: center; gap: 10px; color: #3b2628; text-decoration: none; }
-.public-brand-mark { display: grid; width: 40px; height: 40px; flex: 0 0 auto; place-items: center; }
-.public-brand-mark img { display: block; width: 100%; height: 100%; object-fit: contain; }
-.public-brand > span:last-child { display: flex; flex-direction: column; gap: 3px; }
-.public-brand strong { font-size: 10px; letter-spacing: .8px; }
-.public-brand small { color: #91a096; font-size: 7px; letter-spacing: .8px; }
+.public-brand-logo { display: block; width: 196px; height: auto; }
 .public-nav, .public-header-actions { display: flex; align-items: center; gap: 27px; }
 .public-nav a, .public-header-actions > a:first-child { color: #716567; font-size: 10px; font-weight: 600; text-decoration: none; transition: color .15s; }
 .public-nav a:hover, .public-header-actions > a:first-child:hover { color: var(--public-green); }
@@ -131,9 +127,7 @@
 
 @media (max-width: 600px) {
   .public-header { height: 64px; padding: 0 15px; }
-  .public-brand-mark { width: 34px; height: 34px; }
-  .public-brand strong { font-size: 8px; }
-  .public-brand small { font-size: 6px; }
+  .public-brand-logo { width: 166px; }
   .public-nav { display: none; }
   .public-header-actions { gap: 12px; }
   .public-header-actions > a:first-child { font-size: 9px; }
