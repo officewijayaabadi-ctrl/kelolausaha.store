@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import './App.css';
 import PublicSite from './PublicSite';
 import { plans as activationPlans } from '../shared/plans.js';
-import { dashboardThemes, defaultThemeSettings, getThemeColors } from './themes.js';
+import { dashboardThemes, defaultThemeSettings, getThemeColors, normalizeThemeSettings } from './themes.js';
 
 const dealerName = 'Dealer Motor Wijaya Abadi Mulia';
 
@@ -954,7 +954,7 @@ function App() {
         if (activeUser.role === 'PLATFORM_OWNER') setPlatformData(data);
         else {
           setBillingData(data);
-          setThemeSettings({ ...defaultThemeSettings, ...data.business.themeSettings });
+          setThemeSettings(normalizeThemeSettings(data.business.themeSettings));
         }
         setBillingError('');
       } catch (error) {
@@ -1089,10 +1089,9 @@ function App() {
         setActiveUserId('platform-owner-demo');
         setActivePage('Semua Usaha');
         try {
-          setThemeSettings({
-            ...defaultThemeSettings,
-            ...JSON.parse(localStorage.getItem('ku-demo-theme:dealer_motor') || '{}'),
-          });
+          setThemeSettings(normalizeThemeSettings(
+            JSON.parse(localStorage.getItem('ku-demo-theme:dealer_motor') || '{}'),
+          ));
         } catch (error) {
           setThemeSettings(defaultThemeSettings);
           setThemeError(`Pengaturan tema demo tidak dapat dibaca: ${error.message}`);
@@ -1285,7 +1284,7 @@ function App() {
             {themeError && <div className="notice error-notice" role="alert">{themeError}</div>}
             {demoMode && <div className="notice">Pratinjau demo — pengaturan disimpan lokal dan tidak mengubah data perusahaan.</div>}
             <section className="theme-settings-card">
-              <div className="table-heading"><div><h2>Pilih tema dashboard</h2><p>Biru Profesional menjadi tema default.</p></div></div>
+              <div className="table-heading"><div><h2>Pilih tema dashboard</h2><p>Merah Putih menjadi tema default.</p></div></div>
               <div className="theme-choice-grid">
                 {dashboardThemes.map((theme, index) => <button aria-pressed={themeSettings.themeId === theme.id} className={`theme-choice ${themeSettings.themeId === theme.id ? 'selected' : ''}`} key={theme.id} onClick={() => setThemeSettings((current) => ({ ...current, themeId: theme.id, mode: theme.mode }))} type="button">
                   <span className="theme-choice-preview" style={{ '--swatch-primary': theme.primary, '--swatch-support': theme.secondary }}><i /><i /><i /><b /></span>

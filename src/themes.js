@@ -1,5 +1,5 @@
 export const dashboardThemes = [
-  { id: 'blue-professional', name: 'Biru Profesional', primary: '#2866d7', secondary: '#eaf1ff', mode: 'light' },
+  { id: 'red-white', name: 'Merah Putih', primary: '#d93645', secondary: '#fff1f2', mode: 'light' },
   { id: 'green-fresh', name: 'Hijau Segar', primary: '#21845a', secondary: '#e9f5ed', mode: 'light' },
   { id: 'purple-elegant', name: 'Ungu Elegan', primary: '#7556c4', secondary: '#f0ebfb', mode: 'light' },
   { id: 'orange-cheerful', name: 'Oranye Ceria', primary: '#d97928', secondary: '#fff1e5', mode: 'light' },
@@ -12,7 +12,7 @@ export const dashboardThemes = [
 ];
 
 export const defaultThemeSettings = {
-  themeId: 'blue-professional',
+  themeId: 'red-white',
   customPrimary: '',
   customSecondary: '',
   mode: 'light',
@@ -21,6 +21,12 @@ export const defaultThemeSettings = {
   logoUrl: '',
   faviconUrl: '',
 };
+
+export function normalizeThemeSettings(settings = {}) {
+  const normalized = { ...defaultThemeSettings, ...settings };
+  if (normalized.themeId === 'blue-professional') normalized.themeId = 'red-white';
+  return normalized;
+}
 
 export function getThemeColors(settings) {
   const theme = dashboardThemes.find(({ id }) => id === settings.themeId) || dashboardThemes[0];
