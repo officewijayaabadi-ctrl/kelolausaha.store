@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import multer from 'multer';
 import nodemailer from 'nodemailer';
+import { ImapFlow } from 'imapflow';
+import { simpleParser } from 'mailparser';
 import pg from 'pg';
 import { fileTypeFromBuffer } from 'file-type';
 import { businessTypes, businessTypeIds } from '../shared/business-modules.js';
@@ -170,6 +172,95 @@ async function sendOtpEmail(email, otp) {
     subject: 'Kode masuk KelolaUsaha.store',
     text: `Kode OTP Anda: ${otp}. Kode berlaku 10 menit dan jangan dibagikan.`,
   });
+}
+
+async function sendSupportEmail({ to, subject, text, ticketNumber }) {
+  if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASSWORD) {
+    throw new Error('SMTP belum dikonfigurasi untuk notifikasi bantuan.');
+  }
+  const transport = nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: Number(process.env.SMTP_PORT) || 587,
+    secure: process.env.SMTP_SECURE === 'true',
+    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD },
+  });
+  return transport.sendMail({
+    from: process.env.SMTP_FROM || process.env.SMTP_USER,
+    to,
+    subject: `[${ticketNumber}] ${subject}`,
+    text,
+  });
+}
+
+async function ingestGmailReplies() {
+  const user = process.env.IMAP_USER || process.env.SMTP_USER;
+  const password = process.env.IMAP_PASSWORD || process.env.SMTP_PASSWORD;
+  if (!user || !password) return;
+
+  const client = new ImapFlow({
+    host: process.env.IMAP_HOST || 'imap.gmail.com',
+    port: Number(process.env.IMAP_PORT) || 993,
+    secure: process.env.IMAP_SECURE !== 'false',
+    auth: { user, pass: password },
+    logger: false,
+  });
+
+  await client.connect();
+  try {
+    const lock = await client.getMailboxLock('INBOX');
+    try {
+      for await (const message of client.fetch({ seen: false }, { source: true, envelope: true, uid: true })) {
+        const parsed = await simpleParser(message.source);
+        const combinedText = `${parsed.subject || ''}\n${parsed.text || ''}\n${parsed.html || ''}`;
+        const ticketNumberMatch = combinedText.match(/KU-[A-F0-9]{8}/i);
+        if (!ticketNumberMatch) {
+          await client.messageFlagsAdd(message.uid, ['Seen'], { uid: true });
+          continue;
+        }
+
+        const ticketNumber = ticketNumberMatch[0].toUpperCase();
+        const ticketResult = await pool.query(
+          'SELECT * FROM support_tickets WHERE ticket_number = $1',
+          [ticketNumber],
+        );
+        if (!ticketResult.rowCount) {
+          await client.messageFlagsAdd(message.uid, ['Seen'], { uid: true });
+          continue;
+        }
+
+        const senderEmail = parsed.from?.value?.[0]?.address?.toLowerCase()
+          || String(process.env.PLATFORM_OWNER_EMAIL || '').toLowerCase();
+        const ownerEmail = String(process.env.PLATFORM_OWNER_EMAIL || process.env.SMTP_USER || '').toLowerCase();
+        const senderType = senderEmail === ownerEmail ? 'owner' : 'user';
+        const body = String(parsed.text || parsed.html || '').trim().slice(0, 5000);
+        if (body) {
+          await pool.query(`
+            INSERT INTO support_messages (
+              ticket_id, sender_type, sender_name, sender_email, body,
+              email_message_id, email_direction
+            ) VALUES ($1, $2, $3, $4, $5, $6, 'inbound')
+            ON CONFLICT (email_message_id) DO NOTHING
+          `, [
+            ticketResult.rows[0].id,
+            senderType,
+            parsed.from?.value?.[0]?.name || (senderType === 'owner' ? 'Owner KelolaUsaha.store' : ticketResult.rows[0].requester_name),
+            senderEmail,
+            body,
+            parsed.messageId || null,
+          ]);
+          await pool.query(
+            `UPDATE support_tickets SET status = $1, updated_at = now() WHERE ticket_number = $2`,
+            [senderType === 'owner' ? 'waiting_user' : 'new', ticketNumber],
+          );
+        }
+        await client.messageFlagsAdd(message.uid, ['Seen'], { uid: true });
+      }
+    } finally {
+      lock.release();
+    }
+  } finally {
+    await client.logout();
+  }
 }
 
 app.disable('x-powered-by');
@@ -805,6 +896,170 @@ app.post('/api/billing/notifications/:id/read', authenticate, requireTenant, asy
   }
 });
 
+app.post('/api/support/tickets', async (req, res, next) => {
+  const requesterName = String(req.body?.name || '').trim();
+  const requesterEmail = String(req.body?.email || '').trim().toLowerCase();
+  const subject = String(req.body?.subject || '').trim();
+  const message = String(req.body?.message || '').trim();
+  if (!requesterName || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(requesterEmail)
+    || !subject || message.length < 3 || message.length > 5000) {
+    return res.status(400).json({ message: 'Lengkapi nama, email, kategori, dan pesan bantuan.' });
+  }
+  try {
+    const ticketNumber = `KU-${randomBytes(4).toString('hex').toUpperCase()}`;
+    const ticketResult = await pool.query(
+      `INSERT INTO support_tickets (ticket_number, requester_name, requester_email, subject)
+       VALUES ($1, $2, $3, $4) RETURNING *`,
+      [ticketNumber, requesterName, requesterEmail, subject],
+    );
+    const ticket = ticketResult.rows[0];
+    await pool.query(
+      `INSERT INTO support_messages (ticket_id, sender_type, sender_name, sender_email, body)
+       VALUES ($1, 'user', $2, $3, $4)`,
+      [ticket.id, requesterName, requesterEmail, message],
+    );
+    await sendSupportEmail({
+      to: process.env.PLATFORM_OWNER_EMAIL || process.env.SMTP_USER,
+      subject,
+      ticketNumber,
+      text: `Pesan baru dari ${requesterName} (${requesterEmail})\n\n${message}\n\nNomor tiket: ${ticketNumber}`,
+    });
+    res.status(201).json({ ticket: { id: ticket.id, ticketNumber: ticket.ticket_number, status: ticket.status } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/support/tickets', async (req, res, next) => {
+  const email = String(req.query.email || '').trim().toLowerCase();
+  if (!email) return res.status(400).json({ message: 'Email pengguna wajib diisi.' });
+  try {
+    const result = await pool.query(
+      `SELECT id, ticket_number, requester_name, requester_email, subject, status, created_at, updated_at
+       FROM support_tickets WHERE requester_email = $1 ORDER BY updated_at DESC`,
+      [email],
+    );
+    res.json({ tickets: result.rows });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/support/tickets/:ticketId', async (req, res, next) => {
+  const email = String(req.query.email || '').trim().toLowerCase();
+  try {
+    const ticketResult = await pool.query(
+      `SELECT * FROM support_tickets WHERE id = $1 AND requester_email = $2`,
+      [req.params.ticketId, email],
+    );
+    if (!ticketResult.rowCount) return res.status(404).json({ message: 'Percakapan tidak ditemukan.' });
+    const messageResult = await pool.query(
+      `SELECT id, sender_type, sender_name, sender_email, body, created_at
+       FROM support_messages WHERE ticket_id = $1 ORDER BY created_at ASC`,
+      [req.params.ticketId],
+    );
+    res.json({ ticket: ticketResult.rows[0], messages: messageResult.rows });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/support/tickets/:ticketId/messages', async (req, res, next) => {
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  const body = String(req.body?.message || '').trim();
+  if (!email || body.length < 3 || body.length > 5000) {
+    return res.status(400).json({ message: 'Email dan pesan bantuan wajib diisi.' });
+  }
+  try {
+    const ticketResult = await pool.query(
+      `SELECT * FROM support_tickets WHERE id = $1 AND requester_email = $2`,
+      [req.params.ticketId, email],
+    );
+    if (!ticketResult.rowCount) return res.status(404).json({ message: 'Percakapan tidak ditemukan.' });
+    const ticket = ticketResult.rows[0];
+    await pool.query(
+      `INSERT INTO support_messages (ticket_id, sender_type, sender_name, sender_email, body)
+       VALUES ($1, 'user', $2, $3, $4)`,
+      [ticket.id, ticket.requester_name, email, body],
+    );
+    await pool.query(
+      `UPDATE support_tickets SET status = 'new', updated_at = now() WHERE id = $1`,
+      [ticket.id],
+    );
+    await sendSupportEmail({
+      to: process.env.PLATFORM_OWNER_EMAIL || process.env.SMTP_USER,
+      subject: ticket.subject,
+      ticketNumber: ticket.ticket_number,
+      text: `Pesan lanjutan dari ${ticket.requester_name} (${email})\n\n${body}\n\nNomor tiket: ${ticket.ticket_number}`,
+    });
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/platform/support/tickets', authenticate, requireRole('PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const result = await pool.query(`
+      SELECT t.*, COALESCE((SELECT count(*)::int FROM support_messages m WHERE m.ticket_id = t.id), 0) AS message_count,
+             (SELECT body FROM support_messages m WHERE m.ticket_id = t.id ORDER BY m.created_at DESC LIMIT 1) AS last_message
+      FROM support_tickets t ORDER BY t.updated_at DESC
+    `);
+    res.json({ tickets: result.rows });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/platform/support/tickets/:ticketId', authenticate, requireRole('PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const ticketResult = await pool.query('SELECT * FROM support_tickets WHERE id = $1', [req.params.ticketId]);
+    if (!ticketResult.rowCount) return res.status(404).json({ message: 'Percakapan tidak ditemukan.' });
+    const messageResult = await pool.query(
+      `SELECT id, sender_type, sender_name, sender_email, body, created_at
+       FROM support_messages WHERE ticket_id = $1 ORDER BY created_at ASC`,
+      [req.params.ticketId],
+    );
+    res.json({ ticket: ticketResult.rows[0], messages: messageResult.rows });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/platform/support/tickets/:ticketId/reply', authenticate, requireRole('PLATFORM_OWNER'), async (req, res, next) => {
+  const body = String(req.body?.message || '').trim();
+  const status = String(req.body?.status || 'waiting_user');
+  if (body.length < 3 || body.length > 5000) {
+    return res.status(400).json({ message: 'Balasan minimal 3 karakter.' });
+  }
+  if (!['new', 'processing', 'waiting_user', 'resolved'].includes(status)) {
+    return res.status(400).json({ message: 'Status tiket tidak valid.' });
+  }
+  try {
+    const ticketResult = await pool.query('SELECT * FROM support_tickets WHERE id = $1', [req.params.ticketId]);
+    if (!ticketResult.rowCount) return res.status(404).json({ message: 'Percakapan tidak ditemukan.' });
+    const ticket = ticketResult.rows[0];
+    await pool.query(
+      `INSERT INTO support_messages (ticket_id, sender_type, sender_name, sender_email, body, email_direction)
+       VALUES ($1, 'owner', 'Owner KelolaUsaha.store', $2, $3, 'outbound')`,
+      [ticket.id, process.env.SMTP_USER, body],
+    );
+    await pool.query(
+      `UPDATE support_tickets SET status = $1, updated_at = now() WHERE id = $2`,
+      [status, ticket.id],
+    );
+    await sendSupportEmail({
+      to: ticket.requester_email,
+      subject: `Balasan: ${ticket.subject}`,
+      ticketNumber: ticket.ticket_number,
+      text: `Halo ${ticket.requester_name},\n\n${body}\n\nTim KelolaUsaha.store\n\nNomor tiket: ${ticket.ticket_number}`,
+    });
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get('/api/platform/businesses', authenticate, requireRole('PLATFORM_OWNER'), async (req, res, next) => {
   try {
     const result = await pool.query(
@@ -822,6 +1077,22 @@ app.get('/api/platform/businesses', authenticate, requireRole('PLATFORM_OWNER'),
        LEFT JOIN users u ON u.company_id = c.id AND u.role = 'OWNER'
        ORDER BY c.created_at DESC`,
     );
+    const supportResult = await pool.query(`
+      SELECT
+        count(*)::int AS total,
+        count(*) FILTER (WHERE status = 'new')::int AS new_count,
+        count(*) FILTER (WHERE status IN ('processing', 'waiting_user'))::int AS active_count
+      FROM support_tickets
+    `);
+    const recentBusinessResult = await pool.query(`
+      SELECT id, name, business_type, created_at
+      FROM companies ORDER BY created_at DESC LIMIT 5
+    `);
+    const recentPaymentResult = await pool.query(`
+      SELECT b.id, b.plan_id, b.amount, b.status, b.paid_at, b.created_at, c.name AS business_name
+      FROM billing_orders b JOIN companies c ON c.id = b.company_id
+      ORDER BY COALESCE(b.paid_at, b.created_at) DESC LIMIT 5
+    `);
     res.json({
       businesses: result.rows.map((row) => ({
         ...row,
@@ -832,6 +1103,11 @@ app.get('/api/platform/businesses', authenticate, requireRole('PLATFORM_OWNER'),
         trials: result.rows.filter((row) => subscriptionStatus({ trialEndsAt: row.trial_ends_at, activeUntil: row.active_until, planId: row.plan_id }) === 'trial').length,
         active: result.rows.filter((row) => ['active', 'lifetime'].includes(subscriptionStatus({ trialEndsAt: row.trial_ends_at, activeUntil: row.active_until, planId: row.plan_id }))).length,
         paidRevenue: result.rows.reduce((total, row) => total + Number(row.lifetime_revenue), 0),
+        support: supportResult.rows[0],
+      },
+      activity: {
+        recentBusinesses: recentBusinessResult.rows,
+        recentPayments: recentPaymentResult.rows,
       },
     });
   } catch (error) {
@@ -917,6 +1193,12 @@ async function start() {
   }, 60 * 60 * 1000);
   reminderTimer.unref();
   sendRenewalReminders().catch((error) => console.error('Initial reminder job failed:', error));
+
+  const supportEmailTimer = setInterval(() => {
+    ingestGmailReplies().catch((error) => console.error('Gmail inbox sync failed:', error.message));
+  }, 60 * 1000);
+  supportEmailTimer.unref();
+  ingestGmailReplies().catch((error) => console.error('Gmail inbox sync failed:', error.message));
 }
 
 start().catch((error) => {

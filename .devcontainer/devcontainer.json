@@ -7,7 +7,7 @@
   "updateContentCommand": "npm install",
   "postCreateCommand": "",
   "postAttachCommand": {
-    "server": "npm start"
+    "server": "npm run start:full"
   },
   "customizations": {
     "codespaces": {
@@ -20,7 +20,11 @@
     "3000": {
       "label": "Application",
       "onAutoForward": "openPreview"
+    },
+    "4000": {
+      "label": "API",
+      "onAutoForward": "silent"
     }
   },
-  "forwardPorts": [3000]
+  "forwardPorts": [3000, 4000]
 }

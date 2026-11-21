@@ -96,6 +96,7 @@ const roleMenus = {
   ],
   PLATFORM_OWNER: [
     ['Semua Usaha', '▥'],
+    ['Pusat Bantuan', '?'],
   ],
   HRD: [
     ['Dashboard', '▦'],
@@ -135,6 +136,7 @@ const accessModules = [
   { id: 'activationManage', label: 'Aktivasi paket', group: 'Administrasi' },
   { id: 'platformBusinesses', label: 'Rekap semua usaha', group: 'Platform' },
   { id: 'platformBilling', label: 'Rekap pembayaran', group: 'Platform' },
+  { id: 'supportManage', label: 'Pusat bantuan', group: 'Platform' },
   { id: 'themeManage', label: 'Tampilan dashboard', group: 'Pengaturan' },
   { id: 'userManage', label: 'Manajemen pengguna', group: 'Administrasi' },
   { id: 'accessManage', label: 'Pengelolaan akses', group: 'Administrasi' },
@@ -153,7 +155,7 @@ const rolePermissions = {
   ADMIN: ['dashboard', 'spkCreate', 'spkViewAll', 'spkVerify', 'customerManage', 'salesManage', 'unitManage', 'leasingManage', 'posAccess', 'priceManage', 'transactionsView', 'receiptsView', 'attendanceView'],
   SALES: ['dashboard', 'spkCreate', 'spkViewOwn', 'customerManage', 'attendanceView'],
   KASIR: ['dashboard', 'posAccess', 'priceManage', 'transactionsView', 'receiptsView', 'attendanceView'],
-  PLATFORM_OWNER: ['platformBusinesses', 'platformBilling'],
+  PLATFORM_OWNER: ['platformBusinesses', 'platformBilling', 'supportManage'],
 };
 
 const superAdminRestrictedPermissions = [
@@ -209,6 +211,7 @@ function menuPermission(label) {
   if (['Menu Digital', 'Pesanan'].includes(label)) return 'posAccess';
   if (label === 'Aktivasi') return 'activationManage';
   if (label === 'Semua Usaha') return 'platformBusinesses';
+  if (label === 'Pusat Bantuan') return 'supportManage';
   if (label === 'Tampilan Dashboard') return 'themeManage';
   if (label === 'Absensi') return 'attendanceView';
   if (label === 'Cabang') return 'branchManage';
@@ -646,6 +649,21 @@ function App() {
   const [platformData, setPlatformData] = useState(null);
   const [platformBranchLimits, setPlatformBranchLimits] = useState({});
   const [platformBranchLimitSaving, setPlatformBranchLimitSaving] = useState('');
+  const [supportName, setSupportName] = useState('');
+  const [supportEmail, setSupportEmail] = useState('');
+  const [supportSubject, setSupportSubject] = useState('Bagaimana cara mendaftarkan usaha?');
+  const [supportDraft, setSupportDraft] = useState('');
+  const [supportTickets, setSupportTickets] = useState([]);
+  const [supportActiveTicket, setSupportActiveTicket] = useState(null);
+  const [supportMessages, setSupportMessages] = useState([]);
+  const [supportOwnerTickets, setSupportOwnerTickets] = useState([]);
+  const [supportOwnerTicket, setSupportOwnerTicket] = useState(null);
+  const [supportOwnerMessages, setSupportOwnerMessages] = useState([]);
+  const [supportOwnerReply, setSupportOwnerReply] = useState('');
+  const [supportOwnerStatus, setSupportOwnerStatus] = useState('waiting_user');
+  const [supportBusy, setSupportBusy] = useState(false);
+  const [supportError, setSupportError] = useState('');
+  const [supportNotice, setSupportNotice] = useState('');
   const [billingError, setBillingError] = useState('');
   const [sessionMessage, setSessionMessage] = useState('');
   const [selectedPlan, setSelectedPlan] = useState('year_1');
@@ -747,6 +765,110 @@ function App() {
   const openPage = (page) => {
     setActivePage(page);
     setNotice('');
+    setSupportError('');
+  };
+
+  const createSupportTicket = async (event) => {
+    event.preventDefault();
+    setSupportBusy(true);
+    setSupportError('');
+    try {
+      const response = await fetch('/api/support/tickets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: supportName, email: supportEmail, subject: supportSubject, message: supportDraft }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message || 'Pesan bantuan tidak dapat dikirim.');
+      setSupportName(supportName);
+      setSupportDraft('');
+      await loadSupportTickets(supportEmail);
+      setSupportActiveTicket(result.ticket);
+      await loadSupportConversation(result.ticket.id, supportEmail);
+      setSupportNotice('Pesan berhasil dikirim ke tim KelolaUsaha.store.');
+    } catch (error) {
+      setSupportError(error.message);
+    } finally {
+      setSupportBusy(false);
+    }
+  };
+
+  const loadSupportTickets = async (email) => {
+    if (!email) return;
+    const response = await fetch(`/api/support/tickets?email=${encodeURIComponent(email)}`);
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.message || 'Percakapan bantuan tidak dapat dimuat.');
+    setSupportTickets(result.tickets);
+  };
+
+  const loadSupportConversation = async (ticketId, email) => {
+    const response = await fetch(`/api/support/tickets/${ticketId}?email=${encodeURIComponent(email)}`);
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.message || 'Percakapan tidak dapat dimuat.');
+    setSupportActiveTicket(result.ticket);
+    setSupportMessages(result.messages);
+  };
+
+  const sendSupportMessage = async (event) => {
+    event.preventDefault();
+    if (!supportActiveTicket?.id) return;
+    setSupportBusy(true);
+    setSupportError('');
+    try {
+      const response = await fetch(`/api/support/tickets/${supportActiveTicket.id}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: supportEmail, message: supportDraft }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message || 'Pesan tidak dapat dikirim.');
+      setSupportDraft('');
+      await loadSupportConversation(supportActiveTicket.id, supportEmail);
+    } catch (error) {
+      setSupportError(error.message);
+    } finally {
+      setSupportBusy(false);
+    }
+  };
+
+  const loadOwnerSupportTickets = async () => {
+    const response = await fetch('/api/platform/support/tickets');
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.message || 'Daftar bantuan tidak dapat dimuat.');
+    setSupportOwnerTickets(result.tickets);
+  };
+
+  const openOwnerSupportTicket = async (ticketId) => {
+    const response = await fetch(`/api/platform/support/tickets/${ticketId}`);
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.message || 'Percakapan tidak dapat dimuat.');
+    setSupportOwnerTicket(result.ticket);
+    setSupportOwnerMessages(result.messages);
+    setSupportOwnerStatus(result.ticket.status === 'new' ? 'processing' : result.ticket.status);
+  };
+
+  const replyOwnerSupportTicket = async (event) => {
+    event.preventDefault();
+    if (!supportOwnerTicket?.id) return;
+    setSupportBusy(true);
+    setSupportError('');
+    try {
+      const response = await fetch(`/api/platform/support/tickets/${supportOwnerTicket.id}/reply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: supportOwnerReply, status: supportOwnerStatus }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message || 'Balasan tidak dapat dikirim.');
+      setSupportOwnerReply('');
+      await openOwnerSupportTicket(supportOwnerTicket.id);
+      await loadOwnerSupportTickets();
+      setSupportNotice('Balasan berhasil dikirim dan disimpan ke percakapan.');
+    } catch (error) {
+      setSupportError(error.message);
+    } finally {
+      setSupportBusy(false);
+    }
   };
 
   const persistRestaurantOrders = (nextOrders) => {
@@ -1265,7 +1387,7 @@ function App() {
     { title: 'ORGANISASI', labels: ['Semua Unit', 'Unit Dealer', 'Unit & Motor', 'Motor', 'Customer', 'Sales', 'Leasing', 'Dokumen', 'User Management', 'Pengelolaan Akses', 'Log Aktivitas', 'Cabang'] },
     { title: 'KARYAWAN', labels: ['Absensi'] },
     { title: 'LAPORAN', labels: ['Laporan Penjualan', 'Performance', 'Target'] },
-    { title: 'PLATFORM', labels: ['Semua Usaha'] },
+    { title: 'PLATFORM', labels: ['Semua Usaha', 'Pusat Bantuan'] },
     { title: 'PENGATURAN', labels: ['Struktur Workspace', 'Tampilan Dashboard'] },
   ].map((section) => ({
     ...section,
@@ -1276,7 +1398,9 @@ function App() {
   useEffect(() => {
     const pageIsAllowed = activePage === 'Dashboard'
       ? activeUser.permissions.includes('dashboard')
-      : menus.some(([label]) => label === activePage);
+      : activePage === 'Pusat Bantuan'
+        ? true
+        : menus.some(([label]) => label === activePage);
     if (!pageIsAllowed) {
       setActivePage(menus[0]?.[0] ?? 'Dashboard');
     }
@@ -1352,6 +1476,27 @@ function App() {
       cancelled = true;
       window.clearInterval(refreshTimer);
       if (stopPaymentChecks) window.clearTimeout(stopPaymentChecks);
+    };
+  }, [activeUser.id, activeUser.role, isAuthenticated]);
+
+  useEffect(() => {
+    if (!isAuthenticated || activeUser.role !== 'PLATFORM_OWNER') return undefined;
+    let cancelled = false;
+    const loadSupport = async () => {
+      try {
+        const response = await fetch('/api/platform/support/tickets');
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message || 'Daftar bantuan tidak dapat dimuat.');
+        if (!cancelled) setSupportOwnerTickets(result.tickets);
+      } catch (error) {
+        if (!cancelled) setSupportError(error.message);
+      }
+    };
+    loadSupport();
+    const timer = window.setInterval(loadSupport, 30000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
     };
   }, [activeUser.id, activeUser.role, isAuthenticated]);
 
@@ -1593,7 +1738,7 @@ function App() {
             <span className="help-icon">?</span>
             <strong>Butuh bantuan?</strong>
             <span>Hubungi tim support WAM</span>
-            <button type="button">Pusat bantuan <span aria-hidden="true">→</span></button>
+            <button type="button" onClick={() => openPage('Pusat Bantuan')}>Pusat bantuan <span aria-hidden="true">→</span></button>
           </div>
           <div className="profile">
             <div className="avatar">AP</div>
@@ -1701,6 +1846,79 @@ function App() {
               </tbody></table></div>
             </section>
           </section>
+        ) : activePage === 'Pusat Bantuan' && activeUser.role === 'PLATFORM_OWNER' ? (
+          <section className="content support-page">
+            <div className="page-heading"><div><div className="eyebrow">PLATFORM <span>/</span> BANTUAN</div><h1>Pusat Bantuan</h1><p>Kelola percakapan pengguna dan balas melalui aplikasi serta email.</p></div></div>
+            {(supportError || supportNotice) && <div className={`notice ${supportError ? 'error-notice' : ''}`} role={supportError ? 'alert' : 'status'}>{supportError || supportNotice}</div>}
+            <div className="support-layout">
+              <section className="support-inbox">
+                <div className="table-heading"><div><h2>Percakapan</h2><p>{supportOwnerTickets.length} tiket bantuan</p></div></div>
+                <div className="support-ticket-list">
+                  {supportOwnerTickets.map((ticket) => (
+                    <button className={`support-ticket ${supportOwnerTicket?.id === ticket.id ? 'active' : ''}`} key={ticket.id} onClick={() => openOwnerSupportTicket(ticket.id).catch((error) => setSupportError(error.message))} type="button">
+                      <div><strong>{ticket.requester_name}</strong><span className={`support-status status-${ticket.status}`}>{ticket.status === 'new' ? 'Baru' : ticket.status === 'processing' ? 'Diproses' : ticket.status === 'waiting_user' ? 'Menunggu Pengguna' : 'Selesai'}</span></div>
+                      <p>{ticket.subject}</p><small>{ticket.last_message || 'Belum ada pesan'} · {ticket.message_count} pesan</small>
+                    </button>
+                  ))}
+                  {!supportOwnerTickets.length && <div className="support-empty">Belum ada tiket bantuan.</div>}
+                </div>
+              </section>
+              <section className="support-conversation">
+                {supportOwnerTicket ? (
+                  <>
+                    <div className="support-conversation-header"><div><strong>{supportOwnerTicket.ticket_number}</strong><h2>{supportOwnerTicket.subject}</h2><p>{supportOwnerTicket.requester_name} · {supportOwnerTicket.requester_email}</p></div></div>
+                    <div className="support-messages">
+                      {supportOwnerMessages.map((message) => <article className={`support-message ${message.sender_type}`} key={message.id}><small>{message.sender_type === 'owner' ? 'Owner KelolaUsaha.store' : message.sender_name}</small><p>{message.body}</p><time>{new Intl.DateTimeFormat('id-ID', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(message.created_at))}</time></article>)}
+                    </div>
+                    <form className="support-reply" onSubmit={replyOwnerSupportTicket}>
+                      <label className="field"><span>Status tiket</span><select value={supportOwnerStatus} onChange={(event) => setSupportOwnerStatus(event.target.value)}><option value="new">Baru</option><option value="processing">Diproses</option><option value="waiting_user">Menunggu Pengguna</option><option value="resolved">Selesai</option></select></label>
+                      <label className="field"><span>Balasan</span><textarea maxLength="5000" minLength="3" required value={supportOwnerReply} onChange={(event) => setSupportOwnerReply(event.target.value)} placeholder="Tulis balasan untuk pengguna..." /></label>
+                      <button className="button button-primary" disabled={supportBusy} type="submit">{supportBusy ? 'Mengirim...' : 'Kirim balasan'} <span>→</span></button>
+                    </form>
+                  </>
+                ) : <div className="support-empty"><h2>Pilih percakapan</h2><p>Pilih tiket untuk melihat riwayat dan membalas pengguna.</p></div>}
+              </section>
+            </div>
+          </section>
+        ) : activePage === 'Pusat Bantuan' ? (
+          <section className="content support-page">
+            <div className="page-heading"><div><div className="eyebrow">BANTUAN <span>/</span> SUPPORT</div><h1>Pusat Bantuan KelolaUsaha</h1><p>Ajukan pertanyaan dan pantau balasan tim support.</p></div></div>
+            {(supportError || supportNotice) && <div className={`notice ${supportError ? 'error-notice' : ''}`} role={supportError ? 'alert' : 'status'}>{supportError || supportNotice}</div>}
+            <div className="support-layout user-support-layout">
+              <aside className="support-compose">
+                {!supportActiveTicket ? (
+                  <form onSubmit={createSupportTicket}>
+                    <h2>Mulai percakapan</h2>
+                    <label className="field"><span>Nama</span><input required value={supportName} onChange={(event) => setSupportName(event.target.value)} placeholder="Nama Anda" /></label>
+                    <label className="field"><span>Email</span><input required type="email" value={supportEmail} onChange={(event) => setSupportEmail(event.target.value)} placeholder="nama@email.com" /></label>
+                    <label className="field"><span>Pertanyaan</span><select value={supportSubject} onChange={(event) => setSupportSubject(event.target.value)}><option>Bagaimana cara mendaftarkan usaha?</option><option>Bagaimana cara mengaktifkan paket?</option><option>Bagaimana cara menambah cabang?</option><option>Bagaimana cara mengelola pengguna?</option><option>Saya mengalami kendala pembayaran.</option><option>Pertanyaan lainnya</option></select></label>
+                    <div className="support-prompts">{['Bagaimana cara mendaftarkan usaha?', 'Bagaimana cara mengaktifkan paket?', 'Saya mengalami kendala pembayaran.'].map((prompt) => <button key={prompt} type="button" onClick={() => { setSupportSubject(prompt); setSupportDraft(prompt); }}>{prompt}</button>)}</div>
+                    <label className="field"><span>Pesan</span><textarea required minLength="3" maxLength="5000" value={supportDraft} onChange={(event) => setSupportDraft(event.target.value)} placeholder="Tuliskan pesan Anda..." /></label>
+                    <button className="button button-primary" disabled={supportBusy} type="submit">{supportBusy ? 'Mengirim...' : 'Kirim pesan'} <span>→</span></button>
+                  </form>
+                ) : (
+                  <>
+                    <button className="text-button" type="button" onClick={() => { setSupportActiveTicket(null); setSupportMessages([]); }}>← Percakapan baru</button>
+                    <div className="support-ticket-summary"><strong>{supportActiveTicket.ticket_number}</strong><span>{supportActiveTicket.status}</span></div>
+                  </>
+                )}
+                <div className="support-history-link"><label className="field"><span>Atau muat percakapan lama</span><input type="email" value={supportEmail} onChange={(event) => setSupportEmail(event.target.value)} placeholder="Email Anda" /></label><button className="button button-quiet" type="button" onClick={() => loadSupportTickets(supportEmail).catch((error) => setSupportError(error.message))}>Muatan percakapan</button></div>
+              </aside>
+              <section className="support-conversation">
+                {supportActiveTicket ? (
+                  <>
+                    <div className="support-conversation-header"><div><strong>{supportActiveTicket.ticket_number}</strong><h2>{supportActiveTicket.subject}</h2></div></div>
+                    <div className="support-messages">
+                      {supportMessages.map((message) => <article className={`support-message ${message.sender_type}`} key={message.id}><small>{message.sender_type === 'owner' ? 'Tim KelolaUsaha.store' : 'Anda'}</small><p>{message.body}</p><time>{new Intl.DateTimeFormat('id-ID', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(message.created_at))}</time></article>)}
+                    </div>
+                    <form className="support-reply" onSubmit={sendSupportMessage}><label className="field"><span>Tuliskan pesan Anda...</span><textarea required minLength="3" maxLength="5000" value={supportDraft} onChange={(event) => setSupportDraft(event.target.value)} placeholder="Pesan lanjutan..." /></label><button className="button button-primary" disabled={supportBusy} type="submit">Kirim pesan <span>→</span></button></form>
+                  </>
+                ) : (
+                  <div className="support-empty"><span className="support-empty-icon">?</span><h2>Halo! Ada yang bisa kami bantu?</h2><p>Silakan pilih pertanyaan atau tuliskan kendala Anda.</p>{supportTickets.map((ticket) => <button className="support-history-ticket" key={ticket.id} onClick={() => loadSupportConversation(ticket.id, supportEmail).catch((error) => setSupportError(error.message))}>{ticket.ticket_number} · {ticket.subject}</button>)}</div>
+                )}
+              </section>
+            </div>
+          </section>
         ) : activePage === 'Semua Usaha' && activeUser.role === 'PLATFORM_OWNER' ? (
           <section className="content">
             <div className="page-heading"><div><div className="eyebrow">PLATFORM <span>/</span> OWNER</div><h1>Rekap semua usaha</h1><p>Pantau workspace, masa demo, aktivasi, dan pembayaran.</p></div></div>
@@ -1726,6 +1944,10 @@ function App() {
                 {!platformData?.businesses?.length && <tr><td colSpan="8">{isAuthenticated ? 'Belum ada usaha terdaftar.' : 'Masuk sebagai Owner KelolaUsaha.store untuk melihat data semua usaha.'}</td></tr>}
               </tbody></table></div>
             </section>
+            <div className="support-owner-summary">
+              <section className="table-card"><div className="table-heading"><div><h2>Aktivitas workspace terbaru</h2><p>{platformData?.activity?.recentBusinesses?.length ?? 0} workspace terbaru</p></div></div><div className="table-scroll"><table><thead><tr><th>USAHA</th><th>JENIS</th><th>DIBUAT</th></tr></thead><tbody>{(platformData?.activity?.recentBusinesses ?? []).map((business) => <tr key={business.id}><td><strong>{business.name}</strong></td><td>{business.business_type}</td><td>{new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium' }).format(new Date(business.created_at))}</td></tr>)}</tbody></table></div></section>
+              <section className="table-card"><div className="table-heading"><div><h2>Pembayaran terbaru</h2><p>{platformData?.activity?.recentPayments?.length ?? 0} transaksi terbaru</p></div></div><div className="table-scroll"><table><thead><tr><th>USAHA</th><th>PAKET</th><th>NILAI</th><th>STATUS</th></tr></thead><tbody>{(platformData?.activity?.recentPayments ?? []).map((payment) => <tr key={payment.id}><td><strong>{payment.business_name}</strong></td><td>{payment.plan_id}</td><td className="amount">{rupiah(payment.amount)}</td><td><span className={`activation-status status-${payment.status}`}>{payment.status}</span></td></tr>)}</tbody></table></div></section>
+            </div>
             <p className="billing-copyright">© 2026 KelolaUsaha.store. Data rekap hanya tersedia untuk Owner platform.</p>
           </section>
         ) : activePage === 'Tampilan Dashboard' ? (

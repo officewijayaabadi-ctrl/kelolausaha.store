@@ -924,6 +924,49 @@ td .spk-id { color: #316d50; font-size: 9px; }
   .app-shell[data-sidebar="mini"] .main-area { margin-left: 62px; }
 }
 
+  .support-layout { display: grid; grid-template-columns: 290px minmax(0, 1fr); min-height: 520px; border: 1px solid #edf0f2; border-radius: 8px; overflow: hidden; background: #fff; }
+  .support-inbox, .support-compose { border-right: 1px solid #edf0f2; background: #fbfcfc; }
+  .support-inbox .table-heading, .support-compose { padding: 16px; }
+  .support-ticket-list { display: flex; max-height: 470px; flex-direction: column; overflow-y: auto; }
+  .support-ticket { width: 100%; padding: 13px 16px; border: 0; border-top: 1px solid #edf0f2; text-align: left; background: #fff; }
+  .support-ticket.active { box-shadow: inset 3px 0 #bd2635; background: #fff8f8; }
+  .support-ticket div { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .support-ticket strong { color: #2f3944; font-size: 11px; }
+  .support-ticket p { margin: 6px 0 3px; color: #66717c; font-size: 10px; }
+  .support-ticket small { color: #98a1a8; font-size: 8px; }
+  .support-status { flex: none; padding: 3px 6px; border-radius: 10px; color: #727d86; background: #edf1f3; font-size: 8px; }
+  .support-status.status-new { color: #b02a38; background: #feecef; }
+  .support-status.status-processing { color: #8a6416; background: #fff1d0; }
+  .support-status.status-resolved { color: #1d744a; background: #e6f4ec; }
+  .support-conversation { display: grid; min-width: 0; grid-template-rows: auto minmax(260px, 1fr) auto; }
+  .support-conversation-header { padding: 14px 18px; border-bottom: 1px solid #edf0f2; }
+  .support-conversation-header strong { color: #b02a38; font-size: 9px; }
+  .support-conversation-header h2 { margin: 4px 0 2px; font-size: 15px; }
+  .support-conversation-header p { margin: 0; color: #87919a; font-size: 9px; }
+  .support-messages { display: flex; flex-direction: column; gap: 8px; max-height: 360px; padding: 16px 18px; overflow-y: auto; background: #fafbfb; }
+  .support-message { max-width: 78%; align-self: flex-start; padding: 9px 11px; border: 1px solid #edf0f2; border-radius: 8px 8px 8px 2px; background: #fff; }
+  .support-message.owner { align-self: flex-end; border-color: #dcebe1; border-radius: 8px 8px 2px 8px; background: #eff7f1; }
+  .support-message small { color: #7e8983; font-size: 8px; }
+  .support-message p { margin: 5px 0 4px; color: #3c4650; font-size: 10px; line-height: 1.55; white-space: pre-wrap; }
+  .support-message time { display: block; color: #9da5aa; font-size: 8px; text-align: right; }
+  .support-reply { display: grid; grid-template-columns: 150px minmax(0, 1fr) auto; align-items: end; gap: 10px; padding: 12px 18px; border-top: 1px solid #edf0f2; }
+  .support-reply textarea, .support-compose textarea { min-height: 72px; resize: vertical; }
+  .support-empty { display: grid; min-height: 260px; place-content: center; justify-items: center; padding: 24px; color: #7d8791; text-align: center; }
+  .support-empty h2 { margin: 7px 0 4px; color: #39434d; font-size: 15px; }
+  .support-empty p { margin: 0; font-size: 10px; }
+  .support-empty-icon { display: grid; width: 38px; height: 38px; place-items: center; border: 1px solid #eccfd3; border-radius: 50%; color: #b02a38; background: #fff5f6; }
+  .support-compose form { display: grid; gap: 10px; }
+  .support-compose h2 { margin: 0 0 4px; font-size: 14px; }
+  .support-prompts { display: flex; flex-wrap: wrap; gap: 5px; }
+  .support-prompts button, .support-history-ticket { border: 1px solid #e7ece9; border-radius: 6px; color: #54705f; background: #fff; font-size: 9px; }
+  .support-prompts button { padding: 6px 8px; }
+  .support-history-ticket { width: 100%; margin-top: 7px; padding: 8px; text-align: left; }
+  .support-history-link { margin-top: 14px; padding-top: 12px; border-top: 1px solid #edf0f2; }
+  .support-ticket-summary { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; padding: 10px; border: 1px solid #edf0f2; border-radius: 6px; }
+  .support-owner-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 14px; }
+  @media (max-width: 900px) { .support-layout { grid-template-columns: 230px minmax(0, 1fr); } .support-owner-summary { grid-template-columns: 1fr; } }
+  @media (max-width: 700px) { .support-layout { grid-template-columns: 1fr; } .support-inbox, .support-compose { border-right: 0; border-bottom: 1px solid #edf0f2; } .support-reply { grid-template-columns: 1fr; } .support-reply .button { width: 100%; } }
+
   @media print {
     @page { margin: 8mm; }
     body * { visibility: hidden !important; }
