@@ -59,7 +59,7 @@ function paymentOrigin(req) {
 }
 
 function configuredSmtpUser() {
-  return String(process.env.SMTP_USER || process.env.SMTP_FROM || '').trim();
+  return String(process.env.SMTP_USER || process.env.IMAP_USER || process.env.SMTP_FROM || '').trim();
 }
 
 function constantTimeEqual(left, right) {
