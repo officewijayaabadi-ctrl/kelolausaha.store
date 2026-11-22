@@ -5,7 +5,7 @@ import express from 'express';
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
-const attendanceRoles = ['OWNER', 'SUPER ADMIN', 'HRD', 'SVP', 'SPV', 'KEPALA TOKO', 'ADMIN', 'SALES', 'KASIR'];
+const attendanceRoles = ['OWNER', 'SUPER ADMIN', 'HRD', 'SVP', 'SPV', 'KEPALA TOKO', 'ADMIN', 'SALES', 'KASIR', 'DRIVER'];
 const globalBranchRoles = ['OWNER', 'SUPER ADMIN', 'HRD'];
 const attendanceRequestTypes = new Set(['permission', 'leave', 'sick', 'business_trip']);
 

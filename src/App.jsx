@@ -8,8 +8,18 @@ import { businessTypes } from '../shared/business-modules.js';
 import { dashboardThemes, defaultThemeSettings, getThemeColors, normalizeThemeSettings } from './themes.js';
 import IndustryDashboard from './IndustryDashboard.jsx';
 import { AttendanceWorkspace, BranchManagement } from './WorkspaceOperations.jsx';
+import { DealerMotorWorkspace, DriverDeliveryWorkspace } from './DealerMotorWorkspace.jsx';
 
 const dealerName = 'Dealer Motor Wijaya Abadi Mulia';
+
+function pageFromHash() {
+  if (!window.location.hash.startsWith('#/')) return '';
+  try {
+    return decodeURIComponent(window.location.hash.slice(2));
+  } catch {
+    return '';
+  }
+}
 
 const roleMenus = {
   'SUPER ADMIN': [
@@ -94,6 +104,11 @@ const roleMenus = {
     ['Menu Digital', '☷'],
     ['Pesanan', '☷'],
   ],
+  DRIVER: [
+    ['Dashboard', '▦'],
+    ['Pengiriman', '↗'],
+    ['Absensi', '◷'],
+  ],
   PLATFORM_OWNER: [
     ['Semua Usaha', '▥'],
     ['Pusat Bantuan', '?'],
@@ -124,6 +139,7 @@ const accessModules = [
   { id: 'customerManage', label: 'Data customer', group: 'Data dealer' },
   { id: 'salesManage', label: 'Data sales', group: 'Data dealer' },
   { id: 'unitManage', label: 'Unit dealer & motor', group: 'Data dealer' },
+  { id: 'deliveryManage', label: 'Pengiriman motor', group: 'Operasional' },
   { id: 'leasingManage', label: 'Data leasing & promo', group: 'Data dealer' },
   { id: 'reportsView', label: 'Laporan & performa', group: 'Laporan' },
   { id: 'targetManage', label: 'Target penjualan', group: 'Laporan' },
@@ -155,6 +171,7 @@ const rolePermissions = {
   ADMIN: ['dashboard', 'spkCreate', 'spkViewAll', 'spkVerify', 'customerManage', 'salesManage', 'unitManage', 'leasingManage', 'posAccess', 'priceManage', 'transactionsView', 'receiptsView', 'attendanceView'],
   SALES: ['dashboard', 'spkCreate', 'spkViewOwn', 'customerManage', 'attendanceView'],
   KASIR: ['dashboard', 'posAccess', 'priceManage', 'transactionsView', 'receiptsView', 'attendanceView'],
+  DRIVER: ['dashboard', 'deliveryManage', 'attendanceView'],
   PLATFORM_OWNER: ['platformBusinesses', 'platformBilling', 'supportManage'],
 };
 
@@ -164,6 +181,7 @@ const superAdminRestrictedPermissions = [
 ];
 
 const extraPermissionMenus = [
+  ['Input SPK', '+', 'spkCreate'],
   ['Semua SPK', '▤', 'spkViewAll'],
   ['SPK Saya', '▣', 'spkViewOwn'],
   ['Verifikasi SPK', '✓', 'spkVerify'],
@@ -171,6 +189,7 @@ const extraPermissionMenus = [
   ['Customer', '♙', 'customerManage'],
   ['Sales', '♧', 'salesManage'],
   ['Unit & Motor', '⌂', 'unitManage'],
+  ['Pengiriman', '↗', 'deliveryManage'],
   ['Leasing & Promo', '▣', 'leasingManage'],
   ['Laporan Penjualan', '▥', 'reportsView'],
   ['Target', '◎', 'targetManage'],
@@ -194,6 +213,7 @@ function menuPermission(label) {
   if (['Semua SPK', 'SPK'].includes(label)) return 'spkViewAll';
   if (['SPK Saya', 'Pengajuan', 'Follow Up'].includes(label)) return 'spkViewOwn';
   if (['Semua Unit', 'Unit Dealer', 'Motor', 'Unit & Motor'].includes(label)) return 'unitManage';
+  if (label === 'Pengiriman') return 'deliveryManage';
   if (['Laporan Penjualan', 'Performance'].includes(label)) return 'reportsView';
   if (label === 'Target') return 'targetManage';
   if (label === 'Pembukuan') return 'financeView';
@@ -239,6 +259,7 @@ const initialUsers = [
   { id: 'user-3', name: 'Dedi Kurniawan', email: 'dedi@wam.co.id', role: 'SVP', active: true },
   { id: 'user-4', name: 'Siti Aminah', email: 'siti@wam.co.id', role: 'ADMIN', active: true },
   { id: 'user-5', name: 'Rizky Pratama', email: 'rizky@wam.co.id', role: 'SALES', active: true },
+  { id: 'user-6', name: 'Budi Driver', email: 'driver@wam.co.id', role: 'DRIVER', active: true },
 ].map((user) => ({ ...user, permissions: [...rolePermissions[user.role]] }));
 initialUsers.push({
   id: 'platform-owner-demo',
@@ -256,12 +277,74 @@ const initialSpks = [
   { id: 'SPK-WAM-20261119-0008', customer: 'Fajar Maulana', motor: 'Honda PCX 160', sales: 'Rizky Pratama', amount: 33750000, status: 'SUBMITTED', date: '19 Nov 2026' },
 ];
 
+const previewDealerMotorUnits = [{
+  id: 'preview-unit-vario-160',
+  branchId: 'preview-branch-primary',
+  branchName: 'Cabang Utama',
+  brand: 'Honda',
+  model: 'Vario 160',
+  specification: 'CBS',
+  modelYear: 2026,
+  color: 'Hitam',
+  frameNumber: 'MH1ABC12345678901',
+  engineNumber: 'ABC1234567',
+  otrPrice: 28750000,
+  stockOrigin: 'opening',
+  stockStatus: 'available',
+  stockEntryDate: '2026-11-20',
+}];
+
 const statusClass = (status) => status.toLowerCase().replaceAll(' ', '-');
+const formatLedgerEntryDate = (value) => new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium' })
+  .format(new Date(`${String(value).slice(0, 10)}T00:00:00`));
+
+function isTenantWorkspaceHost(hostname = window.location.hostname) {
+  const host = String(hostname).toLowerCase();
+  return host.endsWith('.kelolausaha.store') && host !== 'www.kelolausaha.store';
+}
+
+function initialsFor(value) {
+  return String(value || '')
+    .trim()
+    .split(/[\s-]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join('')
+    .toUpperCase() || 'U';
+}
+
 const rupiah = (value) => new Intl.NumberFormat('id-ID', {
   style: 'currency',
   currency: 'IDR',
   maximumFractionDigits: 0,
 }).format(Number(value) || 0);
+
+function terbilangRupiah(value) {
+  const amount = Number(value);
+  if (!Number.isSafeInteger(amount) || amount < 0) return '';
+  const words = ['nol', 'satu', 'dua', 'tiga', 'empat', 'lima', 'enam', 'tujuh', 'delapan', 'sembilan', 'sepuluh', 'sebelas'];
+  const belowThousand = (number) => {
+    if (number < 12) return words[number];
+    if (number < 20) return `${belowThousand(number - 10)} belas`;
+    if (number < 100) return `${belowThousand(Math.floor(number / 10))} puluh${number % 10 ? ` ${belowThousand(number % 10)}` : ''}`;
+    if (number < 200) return `seratus${number > 100 ? ` ${belowThousand(number - 100)}` : ''}`;
+    return `${belowThousand(Math.floor(number / 100))} ratus${number % 100 ? ` ${belowThousand(number % 100)}` : ''}`;
+  };
+  const spell = (number) => {
+    if (number < 1000) return belowThousand(number);
+    if (number < 2000) return `seribu${number > 1000 ? ` ${spell(number - 1000)}` : ''}`;
+    for (const [size, label] of [[1e12, 'triliun'], [1e9, 'miliar'], [1e6, 'juta'], [1e3, 'ribu']]) {
+      if (number >= size) {
+        const quantity = Math.floor(number / size);
+        const remainder = number % size;
+        return `${spell(quantity)} ${label}${remainder ? ` ${spell(remainder)}` : ''}`;
+      }
+    }
+    return belowThousand(number);
+  };
+  return `${spell(amount)} rupiah`;
+}
 
 function daysUntil(value) {
   if (!value) return null;
@@ -285,8 +368,9 @@ function padCountdown(value) {
 function getNextSpkNumber(dateCode, items) {
   const prefix = `SPK-WAM-${dateCode}-`;
   const highestNumber = items.reduce((highest, item) => {
-    if (!item.id.startsWith(prefix)) return highest;
-    return Math.max(highest, Number(item.id.slice(prefix.length)) || 0);
+    const number = item.spkNumber || item.id;
+    if (!number.startsWith(prefix)) return highest;
+    return Math.max(highest, Number(number.slice(prefix.length)) || 0);
   }, 0);
   return `${highestNumber + 1}`.padStart(4, '0');
 }
@@ -460,6 +544,41 @@ function AuthScreen({ mode, onModeChange, onBack, onAuthenticated }) {
   const isRegister = mode === 'register';
   const inviteToken = new URLSearchParams(window.location.search).get('invite') ?? '';
   const isEmployeeInvite = isRegister && Boolean(inviteToken);
+  const isTenantWorkspace = isTenantWorkspaceHost();
+  const [tenantBrand, setTenantBrand] = useState(null);
+  const [tenantBrandError, setTenantBrandError] = useState('');
+  const tenantSlugLabel = window.location.hostname.split('.')[0]
+    .split('-')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+  const tenantBrandName = tenantBrand?.name || tenantSlugLabel || 'Workspace usaha';
+  const brandName = isTenantWorkspace ? tenantBrandName : 'KELOLAUSAHA.STORE';
+  const brandMark = isTenantWorkspace
+    ? tenantBrand?.logoUrl
+      ? <img className="auth-brand-mark" alt="" src={tenantBrand.logoUrl} />
+      : <span className="auth-brand-mark auth-tenant-brand-mark">{initialsFor(tenantBrandName)}</span>
+    : <img className="auth-brand-mark" alt="" src="/kelolausaha-mark.svg" />;
+  const isTenantRegistration = isTenantWorkspace && isRegister;
+
+  useEffect(() => {
+    if (!isTenantWorkspace) return undefined;
+    let cancelled = false;
+    const loadTenantBrand = async () => {
+      try {
+        const response = await fetch('/api/public/workspace');
+        if (!response.ok) throw new Error(await getApiError(response, 'Identitas workspace tidak dapat dimuat.'));
+        const result = await response.json();
+        if (!result.workspace?.name) throw new Error('Nama workspace dari server tidak valid.');
+        if (!cancelled) setTenantBrand(result.workspace);
+      } catch (error) {
+        if (!cancelled) setTenantBrandError(error.message);
+      }
+    };
+    loadTenantBrand();
+    return () => {
+      cancelled = true;
+    };
+  }, [isTenantWorkspace]);
 
   const sendOtp = async (event) => {
     event.preventDefault();
@@ -518,6 +637,13 @@ function AuthScreen({ mode, onModeChange, onBack, onAuthenticated }) {
         return;
       }
       const result = await response.json();
+      if (result.pendingApproval) {
+        setMessage(result.message || 'Pendaftaran menunggu persetujuan Owner atau Super Admin.');
+        setMessageIsError(false);
+        setOtpRequested(false);
+        setOtpPayload(null);
+        return;
+      }
       if (!result.user?.id || !result.user?.role) {
         setMessage('Respons autentikasi server tidak lengkap. Silakan hubungi administrator.');
         setMessageIsError(true);
@@ -536,17 +662,17 @@ function AuthScreen({ mode, onModeChange, onBack, onAuthenticated }) {
     <main className="auth-page">
       <div className="auth-orb auth-orb-one" />
       <div className="auth-orb auth-orb-two" />
-      <a className="auth-back-link" href="#dashboard" onClick={(event) => {
+      {!isTenantWorkspace && <a className="auth-back-link" href="#dashboard" onClick={(event) => {
         event.preventDefault();
         onBack();
-      }}>← Kembali</a>
+      }}>← Kembali</a>}
       <section className="auth-layout">
         <div className="auth-showcase">
-          <div className="auth-brand"><img className="auth-brand-mark" src="/kelolausaha-mark.svg" alt="" /><span>KELOLAUSAHA.STORE</span></div>
+          <div className="auth-brand">{brandMark}<span>{brandName}</span></div>
           <div className="auth-showcase-content">
-            <span className="auth-kicker"><span /> WORKSPACE UNTUK USAHA</span>
+            <span className="auth-kicker"><span /> {isTenantWorkspace ? 'WORKSPACE USAHA' : 'WORKSPACE UNTUK USAHA'}</span>
             <h1>Semua urusan usaha,<br /><em>lebih mudah.</em></h1>
-            <p>Atur operasional usaha dan tim Anda dalam satu ruang kerja yang bisa disesuaikan dengan jenis bisnis.</p>
+            <p>{isTenantWorkspace ? `Masuk ke ruang kerja ${tenantBrandName} untuk mengelola operasional dan tim usaha.` : 'Atur operasional usaha dan tim Anda dalam satu ruang kerja yang bisa disesuaikan dengan jenis bisnis.'}</p>
             <div className="auth-showcase-art" aria-hidden="true">
               <div className="art-ring art-ring-one" />
               <div className="art-ring art-ring-two" />
@@ -557,16 +683,33 @@ function AuthScreen({ mode, onModeChange, onBack, onAuthenticated }) {
               <div className="art-moto"><span>KU</span></div>
             </div>
           </div>
-          <div className="auth-showcase-footer"><span>Satu ruang kerja untuk usaha Anda</span><span>KELOLAUSAHA.STORE</span></div>
+          <div className="auth-showcase-footer"><span>{isTenantWorkspace ? `Ruang kerja ${tenantBrandName}` : 'Satu ruang kerja untuk usaha Anda'}</span><span>{brandName}</span></div>
         </div>
 
         <div className="auth-form-side">
-          <div className="auth-mobile-brand"><img className="auth-brand-mark" src="/kelolausaha-mark.svg" alt="" /><strong>KELOLAUSAHA.STORE</strong></div>
+          <div className="auth-mobile-brand">{brandMark}<strong>{brandName}</strong></div>
           <div className="auth-form-wrap" key={`${mode}-${otpRequested}-${isEmployeeInvite}`}>
             <div className="auth-welcome-icon">{otpRequested ? '✉' : isRegister ? '✳' : '↗'}</div>
             <span className="auth-overline">{otpRequested ? 'VERIFIKASI EMAIL' : isRegister ? 'MULAI KELOLA USAHA' : 'SELAMAT DATANG KEMBALI'}</span>
-            <h2>{otpRequested ? 'Cek email Anda' : isRegister ? (isEmployeeInvite ? 'Daftar sebagai karyawan' : 'Buat workspace usaha') : 'Masuk ke akun'}</h2>
-            <p className="auth-description">{otpRequested ? <>Masukkan kode OTP 6 digit yang dikirim ke <strong>{email}</strong>.</> : isEmployeeInvite ? 'Lengkapi data diri untuk bergabung ke workspace usaha.' : isRegister ? 'Verifikasi email terlebih dahulu. Setelah itu, Anda dapat mengisi data usaha dan menyiapkan workspace.' : 'Masuk dengan email. Kami akan mengirim kode OTP untuk verifikasi.'}</p>
+            <h2>{otpRequested
+              ? 'Cek email Anda'
+              : isTenantRegistration || isEmployeeInvite
+                ? 'Daftar sebagai karyawan'
+                : isRegister
+                  ? 'Buat workspace usaha'
+                  : isTenantWorkspace
+                    ? `Masuk ke ${tenantBrandName}`
+                    : 'Masuk ke akun'}</h2>
+            <p className="auth-description">{otpRequested
+              ? <>Masukkan kode OTP 6 digit yang dikirim ke <strong>{email}</strong>.</>
+              : isEmployeeInvite || isTenantRegistration
+                ? `Lengkapi data diri untuk bergabung ke workspace ${tenantBrandName}. Pendaftaran menunggu persetujuan Owner atau Super Admin.`
+                : isRegister
+                  ? 'Verifikasi email terlebih dahulu. Setelah itu, Anda dapat mengisi data usaha dan menyiapkan workspace.'
+                  : isTenantWorkspace
+                    ? `Masuk ke akun workspace ${tenantBrandName}. Kami akan mengirim kode OTP untuk verifikasi.`
+                    : 'Masuk dengan email. Kami akan mengirim kode OTP untuk verifikasi.'}</p>
+            {tenantBrandError && <div className="auth-message" role="status">{tenantBrandError}</div>}
 
             {!otpRequested && <div className="auth-tabs" aria-label="Masuk atau daftar">
               <a aria-current={!isRegister ? 'page' : undefined} className={!isRegister ? 'selected' : ''} href="#masuk" onClick={(event) => {
@@ -604,7 +747,9 @@ function AuthScreen({ mode, onModeChange, onBack, onAuthenticated }) {
             )}
 
             <div className="auth-terms">Kode OTP hanya dikirim melalui server email yang terhubung. Jangan bagikan kode ini kepada siapa pun.</div>
-            <div className="auth-secure-note"><span>✓</span> Akses aman untuk workspace usaha Anda</div>
+            <div className="auth-secure-note"><span>✓</span> Akses aman untuk {isTenantWorkspace ? tenantBrandName : 'workspace usaha Anda'}</div>
+            {isRegister && !inviteToken && isTenantWorkspace
+              && <p className="auth-description">Pendaftaran melalui workspace ini akan menunggu persetujuan Owner atau Super Admin.</p>}
           </div>
         </div>
       </section>
@@ -619,6 +764,8 @@ function BusinessSetupScreen({ onComplete }) {
   );
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState('');
+  const [setupResult, setSetupResult] = useState(null);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   const updateBusinessType = (event) => {
     const nextType = event.target.value;
@@ -643,6 +790,7 @@ function BusinessSetupScreen({ onComplete }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           businessName: formData.get('businessName'),
+          businessAddress: formData.get('businessAddress'),
           businessType,
           modules: selectedModules,
         }),
@@ -652,11 +800,11 @@ function BusinessSetupScreen({ onComplete }) {
         return;
       }
       const result = await response.json();
-      if (!result.user?.id || !result.business?.id) {
+      if (!result.user?.id || !result.business?.id || !result.business?.workspaceUrl) {
         setMessage('Respons setup usaha dari server tidak lengkap. Silakan hubungi administrator.');
         return;
       }
-      onComplete(result, { businessType, modules: selectedModules });
+      setSetupResult(result);
     } catch {
       setMessage('Setup usaha tidak dapat dihubungkan ke server. Silakan coba lagi.');
     } finally {
@@ -681,20 +829,44 @@ function BusinessSetupScreen({ onComplete }) {
         <div className="auth-form-side">
           <div className="auth-form-wrap">
             <div className="auth-welcome-icon">✳</div>
-            <span className="auth-overline">LANGKAH TERAKHIR</span>
-            <h2>Siapkan usaha Anda</h2>
-            <p className="auth-description">Email berhasil diverifikasi. Lengkapi data usaha untuk membuat workspace demo satu bulan.</p>
-            <form className="auth-form" onSubmit={submitSetup}>
-              <label className="auth-field"><span>Nama usaha</span><input autoComplete="organization" name="businessName" placeholder="Contoh: Dealer Motor Sejahtera" required /></label>
-              <label className="auth-field"><span>Jenis usaha</span><select className="auth-select" name="businessType" onChange={updateBusinessType} value={businessType}>{Object.entries(businessTypes).map(([id, business]) => <option key={id} value={id}>{business.label}</option>)}</select></label>
-              <fieldset className="structure-picker">
-                <legend>Struktur workspace <small>Pilih modul yang dibutuhkan</small></legend>
-                <div className="structure-list">{businessTypes[businessType].modules.map(([id, label]) => <label className="structure-option" key={id}><input checked={selectedModules.includes(id)} onChange={() => toggleModule(id)} type="checkbox" /><span>{label}</span></label>)}</div>
-              </fieldset>
-              {message && <div className="auth-message error" role="alert">{message}</div>}
-              <button className="auth-submit" disabled={submitting} type="submit">{submitting ? 'Membuat workspace…' : 'Buat workspace usaha'} <span>→</span></button>
-            </form>
-            <div className="auth-secure-note"><span>✓</span> Demo satu bulan · Tanpa biaya di awal</div>
+            {setupResult ? (
+              <>
+                <span className="auth-overline">WORKSPACE SIAP</span>
+                <h2>{setupResult.business.name}</h2>
+                <p className="auth-description">Alamat workspace dan tautan pendaftaran karyawan sudah dibuat otomatis.</p>
+                <label className="auth-field"><span>Link workspace usaha</span><input aria-label="Link workspace usaha" readOnly value={setupResult.business.workspaceUrl} onFocus={(event) => event.target.select()} /></label>
+                <p className="auth-description">Bagikan link ini kepada karyawan. Pendaftaran mereka akan menunggu persetujuan Owner atau Super Admin.</p>
+                {message && <div className="auth-message error" role="alert">{message}</div>}
+                <button className="auth-submit" onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(setupResult.business.workspaceUrl);
+                    setLinkCopied(true);
+                    setMessage('');
+                  } catch {
+                    setMessage('Link tidak dapat disalin otomatis. Pilih dan salin link di atas.');
+                  }
+                }} type="button">{linkCopied ? 'Link berhasil disalin' : 'Salin link workspace'}</button>
+                <button className="auth-submit" onClick={() => onComplete(setupResult, { businessType, modules: selectedModules })} type="button">Buka workspace <span>→</span></button>
+              </>
+            ) : (
+              <>
+                <span className="auth-overline">LANGKAH TERAKHIR</span>
+                <h2>Siapkan usaha Anda</h2>
+                <p className="auth-description">Email berhasil diverifikasi. Lengkapi data usaha untuk membuat workspace demo satu bulan.</p>
+                <form className="auth-form" onSubmit={submitSetup}>
+                  <label className="auth-field"><span>Nama usaha</span><input autoComplete="organization" name="businessName" placeholder="Contoh: Dealer Motor Sejahtera" required /></label>
+                  <label className="auth-field"><span>Alamat usaha</span><input autoComplete="street-address" name="businessAddress" placeholder="Jalan, kota, dan provinsi" required /></label>
+                  <label className="auth-field"><span>Jenis usaha</span><select className="auth-select" name="businessType" onChange={updateBusinessType} value={businessType}>{Object.entries(businessTypes).map(([id, business]) => <option key={id} value={id}>{business.label}</option>)}</select></label>
+                  <fieldset className="structure-picker">
+                    <legend>Struktur workspace <small>Pilih modul yang dibutuhkan</small></legend>
+                    <div className="structure-list">{businessTypes[businessType].modules.map(([id, label]) => <label className="structure-option" key={id}><input checked={selectedModules.includes(id)} onChange={() => toggleModule(id)} type="checkbox" /><span>{label}</span></label>)}</div>
+                  </fieldset>
+                  {message && <div className="auth-message error" role="alert">{message}</div>}
+                  <button className="auth-submit" disabled={submitting} type="submit">{submitting ? 'Membuat workspace…' : 'Buat workspace usaha'} <span>→</span></button>
+                </form>
+                <div className="auth-secure-note"><span>✓</span> Demo satu bulan · Tanpa biaya di awal</div>
+              </>
+            )}
           </div>
         </div>
       </section>
@@ -704,7 +876,7 @@ function BusinessSetupScreen({ onComplete }) {
 
 function App() {
   const [activeUserId, setActiveUserId] = useState('platform-owner-demo');
-  const [activePage, setActivePage] = useState('Semua Usaha');
+  const [activePage, setActivePage] = useState(() => pageFromHash() || 'Semua Usaha');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [needsBusinessSetup, setNeedsBusinessSetup] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
@@ -744,15 +916,20 @@ function App() {
   );
   const [workspaceModulesSaving, setWorkspaceModulesSaving] = useState(false);
   const [authView, setAuthView] = useState(() => (
-    new URLSearchParams(window.location.search).has('invite') ? 'register' : null
+    new URLSearchParams(window.location.search).has('invite')
+      ? 'register'
+      : isTenantWorkspaceHost() ? 'login' : null
   ));
   const [spks, setSpks] = useState(initialSpks);
   const [users, setUsers] = useState(initialUsers);
   const [workspaceName, setWorkspaceName] = useState('KelolaUsaha.store');
+  const [workspaceUrl, setWorkspaceUrl] = useState('');
   const [accessDraft, setAccessDraft] = useState(null);
   const [inviteRole, setInviteRole] = useState('SUPER ADMIN');
+  const [inviteBranchId, setInviteBranchId] = useState('');
   const [inviteUrl, setInviteUrl] = useState('');
   const [inviting, setInviting] = useState(false);
+  const [memberDecisionBusy, setMemberDecisionBusy] = useState('');
   const [paymentType, setPaymentType] = useState('CREDIT');
   const [priceItems, setPriceItems] = useState(priceCatalogs.dealer_motor);
   const [priceDraft, setPriceDraft] = useState({ name: '', unit: '', price: '' });
@@ -764,6 +941,8 @@ function App() {
   const [posAmountPaid, setPosAmountPaid] = useState('');
   const [posTransactions, setPosTransactions] = useState([]);
   const [printingReceipt, setPrintingReceipt] = useState('');
+  const [motorReceipts, setMotorReceipts] = useState([]);
+  const [printingMotorReceipt, setPrintingMotorReceipt] = useState('');
   const [restaurantOrders, setRestaurantOrders] = useState([]);
   const [restaurantOrderWorkspaceKey, setRestaurantOrderWorkspaceKey] = useState('KelolaUsaha.store');
   const [restaurantQrCodes, setRestaurantQrCodes] = useState([]);
@@ -775,6 +954,7 @@ function App() {
   const [countdownNow, setCountdownNow] = useState(Date.now());
   const [financeEntries, setFinanceEntries] = useState([]);
   const [workspaceBranches, setWorkspaceBranches] = useState([]);
+  const [dealerMotorUnits, setDealerMotorUnits] = useState(previewDealerMotorUnits);
   const [financeBranchId, setFinanceBranchId] = useState('');
   const [financeDraft, setFinanceDraft] = useState({
     type: 'income',
@@ -795,6 +975,14 @@ function App() {
     motor: '',
     type: '',
     color: '',
+    frameNumber: '',
+    engineNumber: '',
+    year: '',
+    unitId: '',
+    stnkName: '',
+    receiptAmount: '',
+    receiptCity: '',
+    receiptNote: '',
     otr: '',
     leasing: '',
     dp: '',
@@ -829,7 +1017,27 @@ function App() {
     setActivePage(page);
     setNotice('');
     setSupportError('');
+    const nextHash = `#/${encodeURIComponent(page)}`;
+    if (window.location.hash !== nextHash) {
+      window.history.pushState(null, '', `${window.location.pathname}${window.location.search}${nextHash}`);
+    }
   };
+
+  useEffect(() => {
+    const syncPageFromUrl = () => {
+      const page = pageFromHash();
+      if (page) {
+        setActivePage(page);
+        setNotice('');
+      }
+    };
+    window.addEventListener('popstate', syncPageFromUrl);
+    window.addEventListener('hashchange', syncPageFromUrl);
+    return () => {
+      window.removeEventListener('popstate', syncPageFromUrl);
+      window.removeEventListener('hashchange', syncPageFromUrl);
+    };
+  }, []);
 
   const createSupportTicket = async (event) => {
     event.preventDefault();
@@ -962,7 +1170,10 @@ function App() {
   }, [restaurantOrderWorkspaceKey]);
 
   useEffect(() => {
-    const clearPrintingReceipt = () => setPrintingReceipt('');
+    const clearPrintingReceipt = () => {
+      setPrintingReceipt('');
+      setPrintingMotorReceipt('');
+    };
     window.addEventListener('afterprint', clearPrintingReceipt);
     return () => window.removeEventListener('afterprint', clearPrintingReceipt);
   }, []);
@@ -1169,7 +1380,14 @@ function App() {
         });
         if (!response.ok) throw new Error(await getApiError(response, 'Catatan pembukuan tidak dapat disimpan.'));
         const result = await response.json();
-        setFinanceEntries((current) => [result.entry, ...current]);
+        if (!result.entry || typeof result.entry !== 'object') {
+          throw new Error('Server tidak mengembalikan catatan pembukuan yang valid.');
+        }
+        const branchName = workspaceBranches.find((branch) => branch.id === result.entry.branchId)?.name;
+        setFinanceEntries((current) => [{
+          ...result.entry,
+          branchName: result.entry.branchName || branchName,
+        }, ...current]);
       } catch (error) {
         setNotice(error.message);
         return;
@@ -1234,8 +1452,32 @@ function App() {
     return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
   };
 
+  const getMotorReceiptWhatsappUrl = (receipt) => {
+    const phone = normalizeWhatsAppNumber(receipt.whatsapp || '');
+    if (phone.length < 10 || phone.length > 15) return '';
+    const message = [
+      `Halo ${receipt.customer}, berikut kwitansi pembelian motor dari ${workspaceName}.`,
+      `No. Kwitansi: ${receipt.receiptNumber}`,
+      `Tanggal: ${receipt.dateLabel}`,
+      `Jumlah: ${rupiah(receipt.amount)} (${terbilangRupiah(receipt.amount)})`,
+      `Motor: ${receipt.motor}`,
+      `No. Rangka: ${receipt.frameNumber || '-'}`,
+      `No. Mesin: ${receipt.engineNumber || '-'}`,
+      `Tahun/Warna: ${receipt.year || '-'} / ${receipt.color || '-'}`,
+      `Atas nama STNK: ${receipt.stnkName}`,
+      `Alamat: ${receipt.address}`,
+      `Keterangan: ${receipt.note}`,
+    ].join('\n');
+    return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+  };
+
   const printPosReceipt = (receiptNumber) => {
     flushSync(() => setPrintingReceipt(receiptNumber));
+    window.print();
+  };
+
+  const printMotorReceipt = (receiptNumber) => {
+    flushSync(() => setPrintingMotorReceipt(receiptNumber));
     window.print();
   };
 
@@ -1243,7 +1485,8 @@ function App() {
     setForm({
       date: getToday(),
       unit: '',
-      sales: '',
+      unitId: '',
+      sales: activeUser.role === 'SALES' ? activeUser.name : '',
       nik: '',
       customer: '',
       whatsapp: '',
@@ -1251,6 +1494,13 @@ function App() {
       motor: '',
       type: '',
       color: '',
+      frameNumber: '',
+      engineNumber: '',
+      year: '',
+      stnkName: '',
+      receiptAmount: '',
+      receiptCity: '',
+      receiptNote: '',
       otr: '',
       leasing: '',
       dp: '',
@@ -1263,28 +1513,171 @@ function App() {
     openPage('Input SPK');
   };
 
-  const saveSpk = (status) => {
+  const saveSpk = async (status) => {
     const dateCode = form.date.replaceAll('-', '');
     const number = getNextSpkNumber(dateCode, spks);
+    const spkNumber = `SPK-WAM-${dateCode}-${number}`;
+    const selectedUnit = dealerMotorUnits.find((unit) => unit.id === form.unitId);
+    if (status === 'SUBMITTED' && !selectedUnit) {
+      setNotice('Pilih unit motor yang tersedia dari stok sebelum submit SPK.');
+      return;
+    }
     const dateLabel = new Intl.DateTimeFormat('id-ID', {
       day: '2-digit',
       month: 'short',
       year: 'numeric',
     }).format(new Date(`${form.date}T00:00:00`));
     const newSpk = {
-      id: `SPK-WAM-${dateCode}-${number}`,
+      id: spkNumber,
+      spkNumber,
       customer: form.customer || 'Customer baru',
       motor: [form.motor, form.type].filter(Boolean).join(' ') || 'Motor belum dipilih',
-      sales: form.sales || 'Belum ditentukan',
-      amount: Number(form.otr) || 0,
+      sales: activeUser.role === 'SALES' ? activeUser.name : form.sales || 'Belum ditentukan',
+      amount: selectedUnit ? Number(selectedUnit.otrPrice) : Number(form.otr) || 0,
       status,
       date: dateLabel,
     };
 
+    if (status === 'SUBMITTED' && isAuthenticated) {
+      try {
+        const response = await fetch('/api/dealer-motor/spks', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            unitId: selectedUnit.id,
+            spkNumber,
+            customerName: form.customer,
+            customerNik: form.nik,
+            customerPhone: form.whatsapp,
+            customerAddress: form.address,
+            salesName: form.sales,
+            details: {
+              date: form.date,
+              paymentType,
+              leasing: form.leasing,
+              downPayment: form.dp,
+              tenor: form.tenor,
+              installment: form.installment,
+              promo: form.promo,
+              discount: form.discount,
+              receiptAmount: form.receiptAmount,
+              receiptCity: form.receiptCity,
+              stnkName: form.stnkName,
+              receiptNote: form.receiptNote,
+            },
+          }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message || 'SPK tidak dapat disimpan.');
+        if (!result.spk?.id || !result.spk?.spkNumber) throw new Error('Data SPK dari server tidak valid.');
+        setSpks((current) => [result.spk, ...current]);
+        const receipt = {
+          receiptNumber: `KWB${dateCode.slice(2, 6)}.${String(motorReceipts.filter((entry) => entry.date === form.date).length + 1).padStart(5, '0')}`,
+          spkNumber: result.spk.spkNumber,
+          date: form.date,
+          dateLabel,
+          city: form.receiptCity,
+          customer: form.customer,
+          whatsapp: form.whatsapp,
+          amount: Number(form.receiptAmount),
+          motor: result.spk.motor,
+          frameNumber: result.spk.frameNumber,
+          engineNumber: result.spk.engineNumber,
+          year: result.spk.year,
+          color: result.spk.color,
+          stnkName: form.stnkName.trim() || form.customer,
+          address: form.address,
+          note: form.receiptNote.trim() || `Pembayaran ${form.customer}`,
+        };
+        setMotorReceipts((current) => [receipt, ...current]);
+        setDealerMotorUnits((current) => current.filter((unit) => unit.id !== selectedUnit.id));
+        openPage(activeUser.permissions.includes('spkViewAll') ? 'Semua SPK' : 'SPK Saya');
+        setNotice(`${result.spk.spkNumber} berhasil disimpan dan menunggu verifikasi Admin.`);
+        return;
+      } catch (error) {
+        setNotice(error.message);
+        return;
+      }
+    }
+
+    if (status === 'SUBMITTED') {
+      const dateReceipts = motorReceipts.filter((receipt) => receipt.date === form.date).length;
+      const receipt = {
+        receiptNumber: `KWB${dateCode.slice(2, 6)}.${String(dateReceipts + 1).padStart(5, '0')}`,
+        spkNumber: newSpk.id,
+        date: form.date,
+        dateLabel,
+        city: form.receiptCity,
+        customer: form.customer,
+        whatsapp: form.whatsapp,
+        amount: Number(form.receiptAmount),
+        motor: [form.motor, form.type].filter(Boolean).join(' '),
+        frameNumber: form.frameNumber.trim(),
+        engineNumber: form.engineNumber.trim(),
+        year: form.year,
+        color: form.color,
+        stnkName: form.stnkName.trim() || form.customer,
+        address: form.address,
+        note: form.receiptNote.trim() || `Pembayaran ${form.customer}`,
+      };
+      setMotorReceipts((current) => [receipt, ...current]);
+    }
+
     setSpks((current) => [newSpk, ...current]);
-    setNotice(`${newSpk.id} berhasil disimpan sebagai ${status.toLowerCase()}.`);
-    setActivePage(activeUser.permissions.includes('spkViewAll') ? 'Semua SPK' : 'SPK Saya');
+    openPage(activeUser.permissions.includes('spkViewAll') ? 'Semua SPK' : 'SPK Saya');
+    setNotice(`${newSpk.spkNumber} berhasil disimpan sebagai ${status.toLowerCase()}.`);
   };
+
+  const transitionSpk = async (spk, permission, allowedStatuses, nextStatus, actionLabel) => {
+    if (!activeUser.permissions.includes(permission)) {
+      setNotice('Akun ini tidak memiliki hak akses untuk tindakan tersebut.');
+      return;
+    }
+    if (!allowedStatuses.includes(spk.status)) {
+      setNotice(`Status ${spk.spkNumber || spk.id} sudah berubah dan tidak dapat ${actionLabel.toLowerCase()}.`);
+      return;
+    }
+    if (isAuthenticated) {
+      try {
+        const action = nextStatus === 'APPROVAL SVP' ? 'verify' : 'approve';
+        const response = await fetch(`/api/dealer-motor/spks/${spk.id}/${action}`, { method: 'PATCH' });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message || `SPK tidak dapat ${actionLabel.toLowerCase()}.`);
+        const changedStatus = result.spk?.status;
+        if (!changedStatus) throw new Error('Status SPK dari server tidak valid.');
+        setSpks((current) => current.map((item) => (
+          item.id === spk.id ? { ...item, status: changedStatus, deliveryStatus: result.spk.deliveryStatus ?? item.deliveryStatus } : item
+        )));
+        setNotice(`${spk.spkNumber || spk.id} berhasil ${actionLabel.toLowerCase()}.`);
+        return;
+      } catch (error) {
+        setNotice(error.message);
+        return;
+      }
+    }
+    setSpks((current) => current.map((item) => (
+      item.id === spk.id && allowedStatuses.includes(item.status)
+        ? { ...item, status: nextStatus }
+        : item
+    )));
+    setNotice(`${spk.spkNumber || spk.id} berhasil ${actionLabel.toLowerCase()}.`);
+  };
+
+  const verifySpk = (spk) => transitionSpk(
+    spk,
+    'spkVerify',
+    ['SUBMITTED', 'VERIFIKASI ADMIN'],
+    'APPROVAL SVP',
+    'diverifikasi dan dikirim untuk approval SVP',
+  );
+
+  const approveSpk = (spk) => transitionSpk(
+    spk,
+    'spkApprove',
+    ['APPROVAL SVP'],
+    'SELESAI',
+    'disetujui',
+  );
 
   const editUserAccess = (user) => {
     setAccessDraft({ ...user, permissions: [...user.permissions] });
@@ -1321,7 +1714,7 @@ function App() {
       const response = await fetch('/api/team/invites', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ role: inviteRole }),
+        body: JSON.stringify({ role: inviteRole, branchId: inviteBranchId || undefined }),
       });
       if (!response.ok) {
         setNotice(await getApiError(response, 'Link pendaftaran tidak dapat dibuat.'));
@@ -1341,6 +1734,30 @@ function App() {
     }
   };
 
+  const decideTeamMember = async (user, decision) => {
+    setMemberDecisionBusy(user.id);
+    setNotice('');
+    try {
+      const response = await fetch(`/api/team/members/${user.id}/approval`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decision }),
+      });
+      if (!response.ok) throw new Error(await getApiError(response, 'Status pendaftaran tidak dapat diperbarui.'));
+      const result = await response.json();
+      setUsers((current) => current.map((member) => (
+        member.id === result.user.id ? { ...member, ...result.user } : member
+      )));
+      setNotice(decision === 'approve'
+        ? `Pendaftaran ${user.name} disetujui.`
+        : `Pendaftaran ${user.name} ditolak.`);
+    } catch (error) {
+      setNotice(error.message);
+    } finally {
+      setMemberDecisionBusy('');
+    }
+  };
+
   const finishAuthentication = (result, registrationPayload) => {
     const user = {
       ...result.user,
@@ -1349,14 +1766,24 @@ function App() {
         : rolePermissions[result.user.role] ?? [],
       active: true,
     };
-    setUsers((current) => [
-      ...current.filter((item) => item.id !== user.id),
-      user,
-    ]);
+    const targetWorkspaceUrl = result.business?.workspaceUrl;
+    if (targetWorkspaceUrl
+      && ['kelolausaha.store', 'www.kelolausaha.store'].includes(window.location.hostname.toLowerCase())) {
+      const target = new URL(targetWorkspaceUrl);
+      if (target.hostname !== window.location.hostname.toLowerCase()) {
+        window.location.assign(`${target.origin}${window.location.pathname}${window.location.search}${window.location.hash}`);
+        return;
+      }
+    }
+    setUsers([user]);
     setActiveUserId(user.id);
+    setDealerMotorUnits([]);
+    setSpks([]);
+    setWorkspaceBranches([]);
     const businessName = result.business?.name || (user.role === 'PLATFORM_OWNER' ? 'KelolaUsaha.store' : workspaceName);
     const orderWorkspaceKey = result.business?.id || businessName;
     setWorkspaceName(businessName);
+    setWorkspaceUrl(targetWorkspaceUrl || '');
     setRestaurantOrderWorkspaceKey(orderWorkspaceKey);
     try {
       const savedOrders = JSON.parse(localStorage.getItem(`ku:restaurant-orders:${orderWorkspaceKey}`) || '[]');
@@ -1383,7 +1810,16 @@ function App() {
     setWorkspaceModuleDraft(activeModules);
     setPriceItems(priceCatalogs[knownBusinessType]);
     setAuthView(null);
-    setActivePage(user.role === 'PLATFORM_OWNER' ? 'Semua Usaha' : 'Dashboard');
+    const defaultPage = user.role === 'PLATFORM_OWNER' ? 'Semua Usaha' : 'Dashboard';
+    const requestedPage = pageFromHash();
+    const requestedPageAllowed = requestedPage === 'Dashboard'
+      ? user.permissions.includes('dashboard')
+      : requestedPage === 'Pusat Bantuan'
+        ? true
+        : getUserMenus(user).some(([label]) => label === requestedPage);
+    const landingPage = requestedPage && requestedPageAllowed ? requestedPage : defaultPage;
+    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#/${encodeURIComponent(landingPage)}`);
+    setActivePage(landingPage);
   };
 
   const saveWorkspaceStructure = async () => {
@@ -1437,6 +1873,18 @@ function App() {
     'Nota Digital': 'digital_receipts',
     'Menu Digital': 'menu',
     Pesanan: 'orders',
+    'Semua Unit': 'vehicles',
+    'Unit Dealer': 'vehicles',
+    'Unit & Motor': 'vehicles',
+    Motor: 'vehicles',
+    'Input SPK': 'sales_orders',
+    'Semua SPK': 'sales_orders',
+    SPK: 'sales_orders',
+    'SPK Saya': 'sales_orders',
+    Pengajuan: 'sales_orders',
+    'Verifikasi SPK': 'sales_orders',
+    Approval: 'sales_orders',
+    Pengiriman: 'sales_orders',
   };
   const menus = getUserMenus(activeUser).filter(([label]) => (
     !enabledMenus[label] || workspaceModules.includes(enabledMenus[label])
@@ -1446,7 +1894,7 @@ function App() {
     || ['Aktivasi', 'Dashboard'].includes(label));
   const menuSections = [
     { title: 'UTAMA', labels: ['Dashboard'] },
-    { title: 'OPERASIONAL', labels: ['Kasir', 'Menu Digital', 'Pesanan', 'Daftar Harga', 'Transaksi', 'Nota Digital', 'Aktivasi', 'Input SPK', 'SPK', 'Semua SPK', 'SPK Saya', 'Pengajuan', 'Follow Up', 'Verifikasi SPK', 'Approval'] },
+    { title: 'OPERASIONAL', labels: ['Kasir', 'Menu Digital', 'Pesanan', 'Daftar Harga', 'Transaksi', 'Nota Digital', 'Aktivasi', 'Input SPK', 'SPK', 'Semua SPK', 'SPK Saya', 'Pengajuan', 'Follow Up', 'Verifikasi SPK', 'Approval', 'Pengiriman'] },
     { title: 'KEUANGAN', labels: ['Pembukuan'] },
     { title: 'ORGANISASI', labels: ['Semua Unit', 'Unit Dealer', 'Unit & Motor', 'Motor', 'Customer', 'Sales', 'Leasing', 'Dokumen', 'User Management', 'Pengelolaan Akses', 'Log Aktivitas', 'Cabang'] },
     { title: 'KARYAWAN', labels: ['Absensi'] },
@@ -1466,13 +1914,22 @@ function App() {
         ? true
         : menus.some(([label]) => label === activePage);
     if (!pageIsAllowed) {
-      setActivePage(menus[0]?.[0] ?? 'Dashboard');
+      const fallbackPage = menus[0]?.[0] ?? 'Dashboard';
+      setActivePage(fallbackPage);
+      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#/${encodeURIComponent(fallbackPage)}`);
     }
   }, [activePage, activeUser, menus]);
 
   useEffect(() => {
     setInviteRole(activeUser.role === 'OWNER' ? 'SUPER ADMIN' : 'ADMIN');
   }, [activeUser.id, activeUser.role]);
+
+  useEffect(() => {
+    if (!inviteBranchId) {
+      const primaryBranch = workspaceBranches.find((branch) => branch.isPrimary);
+      if (primaryBranch) setInviteBranchId(primaryBranch.id);
+    }
+  }, [inviteBranchId, workspaceBranches]);
 
   useEffect(() => {
     if (activeUser.role !== 'OWNER' || !ownerTrialEnd) return undefined;
@@ -1499,6 +1956,32 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!isAuthenticated || demoMode || !['OWNER', 'SUPER ADMIN'].includes(activeUser.role)) return undefined;
+    let cancelled = false;
+    const loadTeamMembers = async () => {
+      try {
+        const response = await fetch('/api/team/members');
+        if (!response.ok) throw new Error(await getApiError(response, 'Daftar anggota workspace tidak dapat dimuat.'));
+        const result = await response.json();
+        if (!Array.isArray(result.users)) throw new Error('Daftar anggota dari server tidak valid.');
+        if (!cancelled) {
+          setUsers(result.users.map((user) => ({
+            ...user,
+            permissions: Array.isArray(user.permissions)
+              ? user.permissions
+              : rolePermissions[user.role] ?? [],
+          })));
+        }
+      } catch (error) {
+        if (!cancelled) setNotice(error.message);
+      }
+    };
+    loadTeamMembers();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeUser.role, isAuthenticated, demoMode]);
   useEffect(() => {
     if (!isAuthenticated || needsBusinessSetup) return undefined;
     let cancelled = false;
@@ -1593,6 +2076,59 @@ function App() {
       cancelled = true;
     };
   }, [activeUser.id, activeUser.role, isAuthenticated]);
+
+  useEffect(() => {
+    const canManageBranches = activeUser.permissions.includes('branchManage');
+    const canLoadUnits = workspaceModules.includes('vehicles')
+      && (activeUser.permissions.includes('unitManage') || activeUser.permissions.includes('spkCreate'));
+    const canLoadSpks = workspaceModules.includes('sales_orders');
+    if (!isAuthenticated || needsBusinessSetup || (!canManageBranches && !canLoadUnits && !canLoadSpks)) return undefined;
+    let cancelled = false;
+    const loadDealerMotorData = async () => {
+      try {
+        const requests = [];
+        const unitsIndex = canLoadUnits ? requests.length : -1;
+        if (canLoadUnits) requests.push(fetch('/api/dealer-motor/units'));
+        const needsBranches = canManageBranches || (canLoadUnits
+          && (activeUser.permissions.includes('unitManage') || activeUser.permissions.includes('spkCreate')));
+        const branchesIndex = needsBranches ? requests.length : -1;
+        if (needsBranches) requests.push(fetch('/api/workspace/operations/branches'));
+        const spkPermission = !canLoadSpks
+          ? ''
+          : activeUser.permissions.includes('spkViewAll')
+            ? 'all'
+            : activeUser.permissions.includes('spkViewOwn')
+              ? 'mine'
+              : activeUser.permissions.includes('spkVerify')
+                ? 'verify'
+                : activeUser.permissions.includes('spkApprove') ? 'approval' : '';
+        const spksIndex = spkPermission ? requests.length : -1;
+        if (spkPermission) requests.push(fetch(`/api/dealer-motor/spks?scope=${spkPermission}`));
+        const responses = await Promise.all(requests);
+        for (const response of responses) {
+          if (!response.ok) throw new Error(await getApiError(response, 'Data stok atau SPK tidak dapat dimuat.'));
+        }
+        const unitsResult = unitsIndex >= 0 ? await responses[unitsIndex].json() : null;
+        const branchesResult = branchesIndex >= 0 ? await responses[branchesIndex].json() : null;
+        const spksResult = spksIndex >= 0 ? await responses[spksIndex].json() : null;
+        if ((unitsResult && !Array.isArray(unitsResult.units))
+          || (branchesResult && !Array.isArray(branchesResult.branches))
+          || (spksResult && !Array.isArray(spksResult.spks))) {
+          throw new Error('Data stok, cabang, atau SPK dari server tidak valid.');
+        }
+        if (cancelled) return;
+        if (unitsResult) setDealerMotorUnits(unitsResult.units);
+        if (branchesResult) setWorkspaceBranches(branchesResult.branches);
+        if (spksResult) setSpks(spksResult.spks);
+      } catch (error) {
+        if (!cancelled) setNotice(error.message);
+      }
+    };
+    loadDealerMotorData();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeUser.id, activeUser.permissions, isAuthenticated, needsBusinessSetup, workspaceModules]);
 
   useEffect(() => {
     if (!themeSettings.faviconUrl) return undefined;
@@ -1720,6 +2256,7 @@ function App() {
         setDemoMode(true);
         setActiveUserId('platform-owner-demo');
         setActivePage('Semua Usaha');
+        setWorkspaceBranches([{ id: 'preview-branch-primary', name: 'Cabang Utama', isPrimary: true }]);
         try {
           setThemeSettings(normalizeThemeSettings(
             JSON.parse(localStorage.getItem('ku-demo-theme:dealer_motor') || '{}'),
@@ -1765,9 +2302,11 @@ function App() {
     >
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark"><img alt={`${workspaceName} logo`} src={themeSettings.logoUrl || '/kelolausaha-mark.svg'} /></div>
+          <div className="brand-mark">{themeSettings.logoUrl
+            ? <img alt={`${workspaceName} logo`} src={themeSettings.logoUrl} />
+            : <span className="brand-initials">{initialsFor(workspaceName)}</span>}</div>
           <div className="brand-copy">
-            <strong>KELOLAUSAHA</strong>
+            <strong>{workspaceName}</strong>
             <span>Workspace usaha</span>
           </div>
         </div>
@@ -1909,7 +2448,7 @@ function App() {
             <section className="table-card full-table">
               <div className="table-heading"><div><h2>Catatan usaha</h2><p>{financeEntries.length} catatan pemasukan dan pengeluaran</p></div></div>
               <div className="table-scroll"><table><thead><tr><th>TANGGAL</th><th>CABANG</th><th>JENIS</th><th>KATEGORI</th><th>KETERANGAN</th><th>NOMINAL</th></tr></thead><tbody>
-                {financeEntries.map((entry) => <tr key={entry.id}><td>{new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium' }).format(new Date(`${entry.entryDate}T00:00:00`))}</td><td>{entry.branchName || '—'}</td><td>{entry.type === 'income' ? 'Pemasukan' : 'Pengeluaran'}</td><td>{entry.category}</td><td>{entry.description}</td><td className="amount">{entry.type === 'expense' ? '−' : '+'}{rupiah(entry.amount)}</td></tr>)}
+                {financeEntries.map((entry) => <tr key={entry.id}><td>{formatLedgerEntryDate(entry.entryDate)}</td><td>{entry.branchName || '—'}</td><td>{entry.type === 'income' ? 'Pemasukan' : 'Pengeluaran'}</td><td>{entry.category}</td><td>{entry.description}</td><td className="amount">{entry.type === 'expense' ? '−' : '+'}{rupiah(entry.amount)}</td></tr>)}
                 {!financeEntries.length && <tr><td colSpan="6">Belum ada catatan. Tambahkan pemasukan atau pengeluaran usaha.</td></tr>}
               </tbody></table></div>
             </section>
@@ -2213,9 +2752,48 @@ function App() {
           </section>
         ) : activePage === 'Nota Digital' ? (
           <section className="content">
-            <div className="page-heading"><div><div className="eyebrow">OPERASIONAL <span>/</span> NOTA</div><h1>Nota Digital</h1><p>Bagikan rincian pembayaran ke pelanggan melalui WhatsApp.</p></div></div>
+            <div className="page-heading"><div><div className="eyebrow">OPERASIONAL <span>/</span> NOTA</div><h1>Nota Digital</h1><p>Cetak atau bagikan nota POS dan kwitansi pembelian motor dari SPK.</p></div></div>
             {notice && <div className="notice" role="status">{notice}</div>}
             <div className="receipt-list">
+              {motorReceipts.map((receipt) => <article className="motor-receipt" data-printing={printingMotorReceipt === receipt.receiptNumber} key={receipt.receiptNumber}>
+                <header className="motor-receipt-header">
+                  <div className="motor-receipt-business">
+                    {themeSettings.logoUrl
+                      ? <img alt="" src={themeSettings.logoUrl} />
+                      : <span className="motor-receipt-mark">KU</span>}
+                    <strong>{workspaceName}</strong>
+                  </div>
+                  <div className="motor-receipt-title"><h2>KWITANSI</h2><strong>{receipt.receiptNumber}</strong><small>SPK {receipt.spkNumber}</small></div>
+                  <div className="motor-receipt-date"><strong>Tgl</strong><span>{receipt.dateLabel}</span><small>No. {receipt.receiptNumber}</small></div>
+                </header>
+                <div className="motor-receipt-row"><strong>Terima dari</strong><span>:</span><span>{receipt.customer}</span></div>
+                <div className="motor-receipt-row motor-receipt-words"><strong>Jumlah uang</strong><span>:</span><em>{terbilangRupiah(receipt.amount)}</em></div>
+                <div className="motor-receipt-row"><strong>Untuk pembayaran</strong><span>:</span><span>Sepeda motor {receipt.motor}</span></div>
+                <div className="motor-receipt-vehicle">
+                  {[
+                    ['Type / Jenis', receipt.motor],
+                    ['No. Rangka', receipt.frameNumber],
+                    ['No. Mesin', receipt.engineNumber],
+                    ['Tahun', receipt.year],
+                    ['Warna', receipt.color],
+                    ['Atas nama STNK', receipt.stnkName],
+                    ['Alamat', receipt.address],
+                  ].map(([label, value]) => <div className="motor-receipt-row" key={label}><span>{label}</span><span>:</span><span>{value || '—'}</span></div>)}
+                </div>
+                <div className="motor-receipt-row motor-receipt-note"><strong>Keterangan</strong><span>:</span><span>{receipt.note}</span></div>
+                <div className="motor-receipt-footer">
+                  <strong className="motor-receipt-amount">{rupiah(receipt.amount)}</strong>
+                  <span>{receipt.city}, {receipt.dateLabel}</span>
+                </div>
+                <div className="motor-receipt-validity">Kwitansi dianggap sah apabila pembayaran telah diterima.</div>
+                <div className="motor-receipt-signature"><span>Pembeli</span><span>Penerima</span></div>
+                <div className="receipt-actions">
+                  <button className="button button-quiet receipt-print" onClick={() => printMotorReceipt(receipt.receiptNumber)} type="button">Cetak kwitansi</button>
+                  {getMotorReceiptWhatsappUrl(receipt)
+                    ? <a className="button button-primary receipt-share" href={getMotorReceiptWhatsappUrl(receipt)} rel="noreferrer" target="_blank">Kirim kwitansi via WhatsApp <span>→</span></a>
+                    : <p className="receipt-warning" role="status">Nomor WhatsApp tidak valid; kwitansi belum dapat dibagikan.</p>}
+                </div>
+              </article>)}
               {posTransactions.map((transaction) => <article className="pos-receipt" data-printing={printingReceipt === transaction.receiptNumber} key={transaction.receiptNumber}>
                 <div className="receipt-heading"><div><span className="receipt-status">{transaction.paymentStatus}</span><h2>{workspaceName}</h2><p>No. Nota: {transaction.receiptNumber}</p></div><span className="receipt-mark">KU</span></div>
                 <div className="receipt-customer"><span>Pelanggan</span><strong>{transaction.customer}</strong>{transaction.tableNumber && <small>Meja {transaction.tableNumber} · {transaction.paymentTiming}</small>}<small>{new Intl.DateTimeFormat('id-ID', { dateStyle: 'long', timeStyle: 'short' }).format(new Date(transaction.createdAt))}</small></div>
@@ -2230,10 +2808,32 @@ function App() {
                     : <p className="receipt-warning" role="status">Nomor WhatsApp tidak valid; nota belum dapat dibagikan.</p>}
                 </div>
               </article>)}
-              {!posTransactions.length && <section className="table-card receipt-empty"><h2>Belum ada nota</h2><p>Simpan transaksi dari menu Kasir untuk membuat nota digital.</p><button className="button button-primary" onClick={() => openPage('Kasir')} type="button">Buka kasir <span>→</span></button></section>}
+              {!posTransactions.length && !motorReceipts.length && <section className="table-card receipt-empty"><h2>Belum ada nota</h2><p>Simpan transaksi Kasir atau submit SPK untuk membuat nota digital dan kwitansi pembelian motor.</p><button className="button button-primary" onClick={() => openPage('Kasir')} type="button">Buka kasir <span>→</span></button></section>}
             </div>
-            <p className="pos-demo-note">WhatsApp membuka pesan nota yang sudah terisi. Nota dan transaksi pada demo ini hanya tersedia selama sesi browser; tautan nota publik memerlukan penyimpanan dan endpoint server.</p>
+            <p className="pos-demo-note">Kwitansi motor dibuat otomatis saat SPK disubmit. Nota dan transaksi pada demo ini hanya tersedia selama sesi browser.</p>
           </section>
+        ) : ['Semua Unit', 'Unit Dealer', 'Motor', 'Unit & Motor'].includes(activePage) ? (
+          <DealerMotorWorkspace
+            branches={workspaceBranches}
+            canManage={isAuthenticated && activeUser.permissions.includes('unitManage')}
+            notice={notice}
+            onCreate={async (unit) => {
+              if (!isAuthenticated) throw new Error('Masuk ke workspace untuk menyimpan stok motor.');
+              const response = await fetch('/api/dealer-motor/units', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(unit),
+              });
+              const result = await response.json();
+              if (!response.ok) throw new Error(result.message || 'Unit motor tidak dapat disimpan.');
+              if (!result.unit?.id) throw new Error('Data unit motor dari server tidak valid.');
+              setDealerMotorUnits((current) => [result.unit, ...current]);
+              setNotice('Unit motor berhasil disimpan ke stok cabang.');
+            }}
+            units={dealerMotorUnits}
+          />
+        ) : activePage === 'Pengiriman' ? (
+          <DriverDeliveryWorkspace isAuthenticated={isAuthenticated} notice={notice} />
         ) : activePage === 'Input SPK' ? (
           <section className="content form-page">
             <div className="page-heading form-heading">
@@ -2254,28 +2854,47 @@ function App() {
                 <div className="form-grid four-columns">
                     <label className="field"><span>Nomor SPK</span><input aria-label="Nomor SPK" disabled value={`SPK-WAM-${form.date.replaceAll('-', '')}-${getNextSpkNumber(form.date.replaceAll('-', ''), spks)}`} /></label>
                   <label className="field"><span>Tanggal SPK <i>*</i></span><input name="date" onChange={updateForm} required type="date" value={form.date} /></label>
-                  <label className="field"><span>Unit dealer <i>*</i></span><select name="unit" onChange={updateForm} required value={form.unit}><option value="">Pilih unit</option><option>WAM - Pusat</option><option>WAM - Cabang Utara</option><option>WAM - Cabang Selatan</option></select></label>
-                  <label className="field"><span>Sales <i>*</i></span><select name="sales" onChange={updateForm} required value={form.sales}><option value="">Pilih sales</option><option>Rizky Pratama</option><option>Dewi Anggraini</option><option>Andi Saputra</option><option>Sales WAM lainnya</option></select></label>
+                  <label className="field"><span>Unit motor dari stok <i>*</i></span><select name="unitId" onChange={(event) => {
+                    const selected = dealerMotorUnits.find((unit) => unit.id === event.target.value);
+                    setForm((current) => ({
+                      ...current,
+                      unitId: event.target.value,
+                      unit: selected?.branchName || '',
+                      motor: selected ? `${selected.brand} ${selected.model}` : '',
+                      type: selected?.specification || '',
+                      color: selected?.color || '',
+                      frameNumber: selected?.frameNumber || '',
+                      engineNumber: selected?.engineNumber || '',
+                      year: selected ? String(selected.modelYear) : '',
+                      otr: selected ? String(selected.otrPrice) : '',
+                    }));
+                  }} required value={form.unitId}><option value="">Pilih unit tersedia</option>{dealerMotorUnits.filter((unit) => unit.stockStatus === 'available').map((unit) => <option key={unit.id} value={unit.id}>{unit.branchName} · {unit.brand} {unit.model} {unit.specification} · {unit.color} · {unit.frameNumber}</option>)}</select></label>
+                  <label className="field"><span>Sales <i>*</i></span>{activeUser.role === 'SALES'
+                    ? <input autoComplete="name" readOnly required value={activeUser.name} />
+                    : <input autoComplete="name" maxLength="120" name="sales" onChange={updateForm} placeholder="Nama sales" required value={form.sales} />}</label>
                 </div>
               </div>
 
               <div className="form-section">
                 <div className="section-title"><span className="section-number">02</span><div><h2>Data customer</h2><p>Identitas dan kontak pelanggan</p></div></div>
                 <div className="form-grid four-columns">
-                  <label className="field"><span>NIK <i>*</i></span><input autoComplete="off" maxLength="16" name="nik" onChange={updateForm} placeholder="Masukkan 16 digit NIK" required value={form.nik} /></label>
+                  <label className="field"><span>NIK <i>*</i></span><input autoComplete="off" inputMode="numeric" maxLength="16" name="nik" onChange={updateForm} pattern="[0-9]{16}" placeholder="Masukkan 16 digit NIK" required value={form.nik} /></label>
                   <label className="field"><span>Nama lengkap <i>*</i></span><input autoComplete="name" name="customer" onChange={updateForm} placeholder="Nama sesuai KTP" required value={form.customer} /></label>
                   <label className="field"><span>Nomor WhatsApp <i>*</i></span><input autoComplete="tel" name="whatsapp" onChange={updateForm} placeholder="08xxxxxxxxxx" required type="tel" value={form.whatsapp} /></label>
-                  <label className="field"><span>Alamat</span><input autoComplete="street-address" name="address" onChange={updateForm} placeholder="Alamat lengkap customer" value={form.address} /></label>
+                  <label className="field"><span>Alamat <i>*</i></span><input autoComplete="street-address" name="address" onChange={updateForm} placeholder="Alamat lengkap customer" required value={form.address} /></label>
                 </div>
               </div>
 
               <div className="form-section">
                 <div className="section-title"><span className="section-number">03</span><div><h2>Data kendaraan</h2><p>Pilih motor dan detail unit yang dipesan</p></div></div>
                 <div className="form-grid four-columns">
-                  <label className="field"><span>Model motor <i>*</i></span><select name="motor" onChange={updateForm} required value={form.motor}><option value="">Pilih motor</option><option>Honda Beat</option><option>Honda Scoopy</option><option>Honda Vario 160</option><option>Honda PCX 160</option></select></label>
-                  <label className="field"><span>Tipe</span><select name="type" onChange={updateForm} value={form.type}><option value="">Pilih tipe</option><option>Deluxe</option><option>CBS</option><option>ABS</option><option>Sport</option></select></label>
-                  <label className="field"><span>Warna</span><select name="color" onChange={updateForm} value={form.color}><option value="">Pilih warna</option><option>Hitam</option><option>Merah</option><option>Putih</option><option>Biru</option></select></label>
-                  <label className="field"><span>Harga OTR <i>*</i></span><div className="input-prefix"><span>Rp</span><input min="0" name="otr" onChange={updateForm} placeholder="0" required type="number" value={form.otr} /></div></label>
+                  <label className="field"><span>Model motor</span><input name="motor" readOnly value={form.motor} /></label>
+                  <label className="field"><span>Tipe / spesifikasi</span><input name="type" readOnly value={form.type} /></label>
+                  <label className="field"><span>Warna</span><input name="color" readOnly value={form.color} /></label>
+                  <label className="field"><span>Harga OTR <i>*</i></span><div className="input-prefix"><span>Rp</span><input min="0" name="otr" readOnly required type="number" value={form.otr} /></div></label>
+                  <label className="field"><span>Tahun</span><input name="year" readOnly value={form.year} /></label>
+                  <label className="field"><span>No. rangka</span><input name="frameNumber" readOnly value={form.frameNumber} /></label>
+                  <label className="field"><span>No. mesin</span><input name="engineNumber" readOnly value={form.engineNumber} /></label>
                 </div>
               </div>
 
@@ -2291,13 +2910,26 @@ function App() {
                     <label className="field"><span>Tenor</span><select name="tenor" onChange={updateForm} value={form.tenor}><option value="">Pilih tenor</option><option>11 bulan</option><option>23 bulan</option><option>35 bulan</option><option>47 bulan</option></select></label>
                     <label className="field"><span>Angsuran / bulan</span><div className="input-prefix"><span>Rp</span><input min="0" name="installment" onChange={updateForm} placeholder="0" type="number" value={form.installment} /></div></label>
                   </>}
+                  <label className="field"><span>Jumlah uang diterima / kwitansi <i>*</i></span><div className="input-prefix"><span>Rp</span><input aria-label="Jumlah uang diterima kwitansi" min="1" name="receiptAmount" onChange={updateForm} placeholder="0" required type="number" value={form.receiptAmount} /></div></label>
                   <label className="field"><span>Promo</span><select name="promo" onChange={updateForm} value={form.promo}><option value="">Tanpa promo</option><option>Promo Akhir Tahun</option><option>Potongan DP</option><option>Gratis servis</option></select></label>
                   <label className="field"><span>Diskon</span><div className="input-prefix"><span>Rp</span><input min="0" name="discount" onChange={updateForm} placeholder="0" type="number" value={form.discount} /></div></label>
                 </div>
               </div>
 
+              <div className="form-section">
+                <div className="section-title"><span className="section-number">05</span><div><h2>Data kwitansi pembeli</h2><p>Informasi yang akan tercetak pada bukti pembayaran motor</p></div></div>
+                <div className="form-grid four-columns">
+                  <label className="field"><span>Kota penerbit kwitansi <i>*</i></span><input autoComplete="address-level2" name="receiptCity" onChange={updateForm} placeholder="Contoh: Bojonegoro" required value={form.receiptCity} /></label>
+                  <label className="field"><span>Atas nama STNK</span><input autoComplete="name" name="stnkName" onChange={updateForm} placeholder={form.customer || 'Nama pemilik STNK'} value={form.stnkName} /></label>
+                  <label className="field"><span>Tahun kendaraan</span><input name="year" readOnly value={form.year} /></label>
+                  <label className="field"><span>No. rangka</span><input autoComplete="off" name="frameNumber" readOnly value={form.frameNumber} /></label>
+                  <label className="field"><span>No. mesin</span><input autoComplete="off" name="engineNumber" readOnly value={form.engineNumber} /></label>
+                  <label className="field"><span>Keterangan kwitansi</span><input maxLength="200" name="receiptNote" onChange={updateForm} placeholder={`Pembayaran ${form.customer || 'pembeli'}`} value={form.receiptNote} /></label>
+                </div>
+              </div>
+
               <div className="form-section documents-section">
-                <div className="section-title"><span className="section-number">05</span><div><h2>Dokumen customer</h2><p>Unggah dokumen pendukung pengajuan SPK</p></div></div>
+                <div className="section-title"><span className="section-number">06</span><div><h2>Dokumen customer</h2><p>Unggah dokumen pendukung pengajuan SPK</p></div></div>
                 <div className="upload-grid">
                   {['KTP', 'Kartu Keluarga', 'Dokumen lainnya'].map((label) => <label className="upload-box" key={label}><input accept="image/*,.pdf" type="file" /><span className="upload-symbol">↑</span><span><strong>{label}</strong><small>PDF atau gambar, maks. 5 MB</small></span><span className="upload-action">Pilih file</span></label>)}
                 </div>
@@ -2324,7 +2956,7 @@ function App() {
                   <td><div className="user-cell"><span className="user-avatar">{user.name.split(' ').map((part) => part[0]).slice(0, 2).join('')}</span><span><strong>{user.name}</strong><small>{user.email}</small></span></div></td>
                   <td><span className={`role-badge role-${user.role.toLowerCase().replaceAll(' ', '-')}`}>{user.role}</span></td>
                   <td><span className="permission-count">{user.permissions.length} modul diizinkan</span></td>
-                  <td><span className={`user-status ${user.active ? 'enabled' : 'disabled'}`}><span />{user.active ? 'Aktif' : 'Nonaktif'}</span></td>
+                  <td><span className={`user-status ${user.active ? 'enabled' : 'disabled'}`}><span />{user.approvalStatus === 'pending' ? 'Menunggu persetujuan' : user.active ? 'Aktif' : 'Nonaktif'}</span></td>
                   <td>{(activeUser.role === 'OWNER' || !['OWNER', 'PLATFORM_OWNER'].includes(user.role)) && <button aria-label={`Atur akses ${user.name}`} className="button button-quiet access-edit-button" onClick={() => editUserAccess(user)} type="button">Atur akses</button>}</td>
                 </tr>)}
               </tbody></table></div>
@@ -2336,7 +2968,7 @@ function App() {
                 <div className="access-modal-header"><div><div className="eyebrow">PENGATURAN PENGGUNA</div><h2 id="access-modal-title">Atur akses pengguna</h2><p>{accessDraft.name} · {accessDraft.email}</p></div><button aria-label="Tutup pengaturan akses" className="modal-close" onClick={() => setAccessDraft(null)} type="button">×</button></div>
                 <div className="access-modal-body">
                   <div className="access-user-settings">
-                    <label className="field"><span>Peran pengguna</span><select onChange={(event) => setAccessDraft((current) => ({ ...current, role: event.target.value }))} value={accessDraft.role}>{(activeUser.role === 'OWNER' ? ['SUPER ADMIN', 'SVP', 'ADMIN', 'SALES', 'KASIR'] : ['SVP', 'ADMIN', 'SALES', 'KASIR', ...(accessDraft.role === 'SUPER ADMIN' ? ['SUPER ADMIN'] : [])]).map((item) => <option key={item}>{item}</option>)}</select></label>
+                    <label className="field"><span>Peran pengguna</span><select onChange={(event) => setAccessDraft((current) => ({ ...current, role: event.target.value }))} value={accessDraft.role}>{(activeUser.role === 'OWNER' ? ['SUPER ADMIN', 'HRD', 'SVP', 'SPV', 'KEPALA TOKO', 'ADMIN', 'SALES', 'KASIR', 'DRIVER'] : ['HRD', 'SVP', 'SPV', 'KEPALA TOKO', 'ADMIN', 'SALES', 'KASIR', 'DRIVER', ...(accessDraft.role === 'SUPER ADMIN' ? ['SUPER ADMIN'] : [])]).map((item) => <option key={item}>{item}</option>)}</select></label>
                     <label className="access-active-control"><span><strong>Akun aktif</strong><small>Pengguna dapat mengakses sistem</small></span><input checked={accessDraft.active} onChange={(event) => setAccessDraft((current) => ({ ...current, active: event.target.checked }))} type="checkbox" /><span className="switch-track" /></label>
                   </div>
                   <div className="permission-heading"><div><h3>Hak akses individual</h3><p>Pilih modul yang boleh diakses pengguna ini.</p></div><button className="reset-permissions" onClick={() => setAccessDraft((current) => ({ ...current, permissions: [...rolePermissions[current.role]] }))} type="button">Gunakan akses standar {accessDraft.role}</button></div>
@@ -2353,25 +2985,31 @@ function App() {
         ) : activePage === 'User Management' ? (
           <section className="content">
             <div className="page-heading access-heading">
-              <div><div className="eyebrow">WORKSPACE <span>/</span> TIM USAHA</div><h1>Manajemen karyawan</h1><p>Buat link pendaftaran agar karyawan dapat bergabung ke workspace {workspaceName}.</p></div>
+              <div><div className="eyebrow">WORKSPACE <span>/</span> TIM USAHA</div><h1>Manajemen karyawan</h1><p>Bagikan link workspace {workspaceName} atau buat link pendaftaran khusus berdasarkan peran.</p></div>
             </div>
             {notice && <div className="notice" role="status">{notice}</div>}
+            {workspaceUrl && <label className="invite-link-field"><span>Link workspace untuk karyawan</span><input aria-label="Link workspace untuk karyawan" readOnly value={workspaceUrl} onFocus={(event) => event.target.select()} /></label>}
             {['OWNER', 'SUPER ADMIN'].includes(activeUser.role) && <section className="invite-card">
-              <div><span className="invite-card-icon">＋</span><div><h2>{activeUser.role === 'OWNER' ? 'Undang Super Admin atau karyawan' : 'Undang karyawan'}</h2><p>{activeUser.role === 'OWNER' ? 'Owner mengatur siapa yang menjadi Super Admin; pendaftaran undangan diverifikasi dengan OTP.' : 'Super Admin hanya dapat membuat undangan tim operasional.'}</p></div></div>
+              <div><span className="invite-card-icon">＋</span><div><h2>{activeUser.role === 'OWNER' ? 'Undang Super Admin atau karyawan' : 'Undang karyawan'}</h2><p>{activeUser.role === 'OWNER' ? 'Pendaftaran melalui link peran diverifikasi dengan OTP dan menunggu persetujuan.' : 'Super Admin hanya dapat membuat undangan tim operasional.'}</p></div></div>
               <form className="invite-form" onSubmit={createEmployeeInvite}>
-                <label className="field"><span>Peran undangan</span><select aria-label="Peran karyawan" onChange={(event) => setInviteRole(event.target.value)} value={inviteRole}>{(activeUser.role === 'OWNER' ? ['SUPER ADMIN', 'HRD', 'SVP', 'SPV', 'KEPALA TOKO', 'ADMIN', 'SALES', 'KASIR'] : ['HRD', 'SVP', 'SPV', 'KEPALA TOKO', 'ADMIN', 'SALES', 'KASIR']).map((item) => <option key={item}>{item}</option>)}</select></label>
+                <label className="field"><span>Peran undangan</span><select aria-label="Peran karyawan" onChange={(event) => setInviteRole(event.target.value)} value={inviteRole}>{(activeUser.role === 'OWNER' ? ['SUPER ADMIN', 'HRD', 'SVP', 'SPV', 'KEPALA TOKO', 'ADMIN', 'SALES', 'KASIR', 'DRIVER'] : ['HRD', 'SVP', 'SPV', 'KEPALA TOKO', 'ADMIN', 'SALES', 'KASIR', 'DRIVER']).map((item) => <option key={item}>{item}</option>)}</select></label>
+                <label className="field"><span>Cabang penempatan</span><select aria-label="Cabang karyawan" onChange={(event) => setInviteBranchId(event.target.value)} value={inviteBranchId}><option value="">Cabang utama otomatis</option>{workspaceBranches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>
                 <button className="button button-primary" disabled={inviting} type="submit">{inviting ? 'Membuat link…' : 'Buat link pendaftaran'} <span>→</span></button>
               </form>
               {inviteUrl && <label className="invite-link-field"><span>Link pendaftaran karyawan</span><input aria-label="Link pendaftaran karyawan" readOnly value={inviteUrl} onFocus={(event) => event.target.select()} /></label>}
             </section>}
             <section className="table-card access-table">
               <div className="table-heading"><div><h2>Pengguna workspace</h2><p>{users.length} pengguna terdaftar</p></div></div>
-              <div className="table-scroll"><table><thead><tr><th>PENGGUNA</th><th>EMAIL</th><th>PERAN</th><th>STATUS</th></tr></thead><tbody>
+              <div className="table-scroll"><table><thead><tr><th>PENGGUNA</th><th>EMAIL</th><th>PERAN</th><th>STATUS</th><th /></tr></thead><tbody>
                 {users.map((user) => <tr key={user.id}>
                   <td><div className="user-cell"><span className="user-avatar">{user.name.split(' ').map((part) => part[0]).slice(0, 2).join('')}</span><strong>{user.name}</strong></div></td>
                   <td>{user.email}</td>
                   <td><span className={`role-badge role-${user.role.toLowerCase().replaceAll(' ', '-')}`}>{user.role}</span></td>
-                  <td><span className={`user-status ${user.active ? 'enabled' : 'disabled'}`}><span />{user.active ? 'Aktif' : 'Nonaktif'}</span></td>
+                  <td><span className={`user-status ${user.active ? 'enabled' : 'disabled'}`}><span />{user.approvalStatus === 'pending' ? 'Menunggu persetujuan' : user.active ? 'Aktif' : 'Nonaktif'}</span></td>
+                  <td>{user.approvalStatus === 'pending' && ['OWNER', 'SUPER ADMIN'].includes(activeUser.role) && <>
+                    <button className="button button-primary" disabled={memberDecisionBusy === user.id} onClick={() => decideTeamMember(user, 'approve')} type="button">Setujui</button>
+                    <button className="button button-quiet" disabled={memberDecisionBusy === user.id} onClick={() => decideTeamMember(user, 'reject')} type="button">Tolak</button>
+                  </>}</td>
                 </tr>)}
               </tbody></table></div>
             </section>
@@ -2451,7 +3089,7 @@ function App() {
             <section className="table-card">
               <div className="table-heading"><div><h2>SPK terbaru</h2><p>Pengajuan penjualan yang terakhir diperbarui</p></div><button className="text-button" onClick={() => openPage('Semua SPK')} type="button">Lihat semua <span>→</span></button></div>
               <div className="table-scroll"><table><thead><tr><th>NOMOR SPK</th><th>CUSTOMER</th><th>KENDARAAN</th><th>SALES</th><th>NILAI OTR</th><th>STATUS</th><th /></tr></thead><tbody>
-                {spks.slice(0, 5).map((item) => <tr key={item.id}><td><strong className="spk-id">{item.id}</strong><small>{item.date}</small></td><td><strong>{item.customer}</strong><small>Customer</small></td><td>{item.motor}</td><td>{item.sales}</td><td className="amount">{rupiah(item.amount)}</td><td><span className={`status-badge ${statusClass(item.status)}`}><span />{item.status}</span></td><td><button className="row-menu" aria-label={`Opsi ${item.id}`} type="button">···</button></td></tr>)}
+                {spks.slice(0, 5).map((item) => <tr key={item.id}><td><strong className="spk-id">{item.spkNumber || item.id}</strong><small>{item.date || item.createdDate}</small></td><td><strong>{item.customer}</strong><small>Customer</small></td><td>{item.motor}</td><td>{item.sales}</td><td className="amount">{rupiah(item.amount)}</td><td><span className={`status-badge ${statusClass(item.status)}`}><span />{item.status}</span></td><td><button className="row-menu" aria-label={`Opsi ${item.spkNumber || item.id}`} type="button">···</button></td></tr>)}
               </tbody></table></div>
             </section>
 
@@ -2467,7 +3105,11 @@ function App() {
             <section className="table-card full-table">
               <div className="table-heading"><div><h2>{heading === 'Semua SPK' || heading === 'SPK' ? 'Daftar SPK' : `Data ${heading}`}</h2><p>{spks.length} pengajuan penjualan terdaftar</p></div><div className="table-tools"><input aria-label="Cari data" placeholder="Cari customer atau nomor SPK..." /><button className="filter-button" type="button">Semua status <span>⌄</span></button></div></div>
               <div className="table-scroll"><table><thead><tr><th>NOMOR SPK</th><th>CUSTOMER</th><th>KENDARAAN</th><th>SALES</th><th>NILAI OTR</th><th>STATUS</th><th /></tr></thead><tbody>
-                {spks.map((item) => <tr key={item.id}><td><strong className="spk-id">{item.id}</strong><small>{item.date}</small></td><td><strong>{item.customer}</strong><small>Customer</small></td><td>{item.motor}</td><td>{item.sales}</td><td className="amount">{rupiah(item.amount)}</td><td><span className={`status-badge ${statusClass(item.status)}`}><span />{item.status}</span></td><td><button className="row-menu" aria-label={`Opsi ${item.id}`} type="button">···</button></td></tr>)}
+                {spks.map((item) => <tr key={item.id}><td><strong className="spk-id">{item.spkNumber || item.id}</strong><small>{item.date || item.createdDate}</small></td><td><strong>{item.customer}</strong><small>Customer</small></td><td>{item.motor}</td><td>{item.sales}</td><td className="amount">{rupiah(item.amount)}</td><td><span className={`status-badge ${statusClass(item.status)}`}><span />{item.status}</span></td><td className="spk-actions">
+                  {activeUser.permissions.includes('spkVerify') && ['SUBMITTED', 'VERIFIKASI ADMIN'].includes(item.status) && <button aria-label={`Verifikasi SPK ${item.spkNumber || item.id}`} className="button button-quiet" onClick={() => verifySpk(item)} type="button">Verifikasi SPK</button>}
+                  {activeUser.permissions.includes('spkApprove') && item.status === 'APPROVAL SVP' && <button aria-label={`Setujui SPK ${item.spkNumber || item.id}`} className="button button-primary" onClick={() => approveSpk(item)} type="button">Setujui SPK</button>}
+                  {!['SUBMITTED', 'VERIFIKASI ADMIN', 'APPROVAL SVP'].includes(item.status) && <span aria-label="Tidak ada tindakan SPK">—</span>}
+                </td></tr>)}
               </tbody></table></div>
             </section>
           </section>

@@ -11,9 +11,11 @@ import { simpleParser } from 'mailparser';
 import pg from 'pg';
 import { fileTypeFromBuffer } from 'file-type';
 import { businessTypes, businessTypeIds } from '../shared/business-modules.js';
-import { verifyNotificationSignature } from './midtrans.js';
+import { createDealerMotorRouter } from './dealer-motor.js';
+import { midtransFailureMessage, resolveMidtransEnvironment, verifyNotificationSignature } from './midtrans.js';
 import { createOperationsRouter, createPublicOperationsRouter } from './operations.js';
 import { addCalendarMonths, getBranchAddon, getPlan, plans, branchAddons, subscriptionStatus, trialEndsAt } from './plans.js';
+import { slugifyBusinessName, tenantSlugFromHost, workspaceUrlFor } from './tenant-domain.js';
 import { createWorkspaceOperationsRouter } from './workspace-operations.js';
 
 const { Pool } = pg;
@@ -25,6 +27,9 @@ const uploadDirectory = resolve(process.env.UPLOAD_DIR || 'uploads');
 const privateAttendanceDirectory = process.env.PRIVATE_ATTENDANCE_DIR
   ? resolve(process.env.PRIVATE_ATTENDANCE_DIR)
   : resolve(uploadDirectory, '..', 'attendance-private');
+const privateDeliveryDirectory = process.env.PRIVATE_DELIVERY_DIR
+  ? resolve(process.env.PRIVATE_DELIVERY_DIR)
+  : resolve(uploadDirectory, '..', 'delivery-private');
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 2 * 1024 * 1024 } });
 const otpRateLimits = new Map();
 const themeIds = new Set(['blue-professional', 'green-fresh', 'purple-elegant', 'orange-cheerful', 'pink-sweet', 'teal-modern', 'navy-elegant', 'yellow-warm', 'gray-minimal', 'white-clean']);
@@ -39,6 +44,7 @@ const permissionSets = {
   ADMIN: ['dashboard', 'spkCreate', 'spkViewAll', 'spkVerify', 'customerManage', 'salesManage', 'unitManage', 'leasingManage', 'posAccess', 'priceManage', 'transactionsView', 'receiptsView', 'attendanceView'],
   SALES: ['dashboard', 'spkCreate', 'spkViewOwn', 'customerManage', 'attendanceView'],
   KASIR: ['dashboard', 'posAccess', 'priceManage', 'transactionsView', 'receiptsView', 'attendanceView'],
+  DRIVER: ['dashboard', 'deliveryManage', 'attendanceView'],
   PLATFORM_OWNER: ['dashboard', 'platformBusinesses', 'platformBilling'],
 };
 
@@ -52,6 +58,50 @@ function otpHash(email, otp) {
 
 function configuredMidtransServerKey() {
   return String(process.env.MIDTRANS_SERVER_KEY || '').trim();
+}
+
+function appRootOrigin(req) {
+  const configuredOrigin = String(process.env.APP_ORIGIN || '').trim();
+  if (configuredOrigin) {
+    const url = new URL(configuredOrigin);
+    const hostname = url.hostname.replace(/^www\./, '');
+    return `${url.protocol}//${hostname}${url.port ? `:${url.port}` : ''}`;
+  }
+  const requestHost = String(req.hostname || req.get('host') || '').toLowerCase();
+  const rootDomain = requestHost === 'kelolausaha.store' || requestHost.endsWith('.kelolausaha.store')
+    ? 'kelolausaha.store'
+    : requestHost;
+  return `${req.protocol}://${rootDomain}`;
+}
+
+function appRootDomain(req) {
+  return new URL(appRootOrigin(req)).hostname;
+}
+
+function requestTenantSlug(req) {
+  return tenantSlugFromHost(req.hostname || req.get('host'), appRootDomain(req));
+}
+
+function sessionCookieDomain() {
+  const configuredDomain = String(process.env.APP_ROOT_DOMAIN || '').trim();
+  const origin = configuredDomain
+    ? `https://${configuredDomain.replace(/^\./, '')}`
+    : String(process.env.APP_ORIGIN || 'https://kelolausaha.store').trim();
+  const hostname = new URL(origin).hostname.replace(/^www\./, '');
+  return hostname.includes('.') ? `; Domain=.${hostname}` : '';
+}
+
+async function uniqueBusinessSlug(client, businessName) {
+  const baseSlug = slugifyBusinessName(businessName);
+  await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [baseSlug]);
+  let slug = baseSlug;
+  let suffix = 2;
+  while (true) {
+    const result = await client.query('SELECT 1 FROM companies WHERE slug = $1', [slug]);
+    if (!result.rowCount) return slug;
+    slug = `${baseSlug}-${suffix}`;
+    suffix += 1;
+  }
 }
 
 function paymentOrigin(req) {
@@ -70,12 +120,14 @@ function constantTimeEqual(left, right) {
 
 function setSessionCookie(res, token) {
   const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
-  res.setHeader('Set-Cookie', `ku_session=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESSION_DAYS * 86400}${secure}`);
+  const domain = process.env.NODE_ENV === 'production' ? sessionCookieDomain() : '';
+  res.setHeader('Set-Cookie', `ku_session=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESSION_DAYS * 86400}${secure}${domain}`);
 }
 
 function clearSessionCookie(res) {
   const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
-  res.setHeader('Set-Cookie', `ku_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secure}`);
+  const domain = process.env.NODE_ENV === 'production' ? sessionCookieDomain() : '';
+  res.setHeader('Set-Cookie', `ku_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secure}${domain}`);
 }
 
 function cookieValue(req, key) {
@@ -84,10 +136,12 @@ function cookieValue(req, key) {
   return value?.trim().slice(key.length + 1);
 }
 
-function publicBusiness(row) {
+function publicBusiness(row, req) {
   return {
     id: row.id,
     name: row.name,
+    slug: row.slug,
+    workspaceUrl: row.slug ? workspaceUrlFor(row.slug, appRootOrigin(req)) : null,
     type: row.business_type,
     modules: row.modules,
     subscription: {
@@ -110,8 +164,8 @@ async function authenticate(req, res, next) {
   if (!token) return res.status(401).json({ message: 'Silakan masuk kembali.' });
   try {
     const result = await pool.query(
-      `SELECT u.id, u.name, u.email, u.role, u.permissions, u.company_id,
-              c.name AS company_name, c.business_type, c.modules, c.trial_started_at,
+      `SELECT u.id, u.name, u.email, u.role, u.permissions, u.company_id, u.branch_id,
+              c.name AS company_name, c.slug AS company_slug, c.business_type, c.modules, c.trial_started_at,
               c.trial_ends_at, c.active_until, c.plan_id, c.subscription_status,
               c.theme_settings
        FROM sessions s
@@ -122,6 +176,10 @@ async function authenticate(req, res, next) {
     );
     if (!result.rowCount) return res.status(401).json({ message: 'Sesi telah berakhir. Silakan masuk kembali.' });
     req.user = result.rows[0];
+    const tenantSlug = requestTenantSlug(req);
+    if (tenantSlug && req.user.company_slug !== tenantSlug) {
+      return res.status(403).json({ message: 'Akun ini tidak terdaftar pada workspace usaha tersebut.' });
+    }
     next();
   } catch (error) {
     next(error);
@@ -135,13 +193,23 @@ function requireRole(...roles) {
   };
 }
 
+function requirePermission(...permissions) {
+  return (req, res, next) => {
+    if (!Array.isArray(req.user.permissions)
+      || !permissions.some((permission) => req.user.permissions.includes(permission))) {
+      return res.status(403).json({ message: 'Akses tidak diizinkan.' });
+    }
+    next();
+  };
+}
+
 function requireTenant(req, res, next) {
   if (!req.user.company_id) return res.status(403).json({ message: 'Akun ini tidak terikat ke workspace usaha.' });
   next();
 }
 
 function requireActiveTenant(req, res, next) {
-  if (!['SUPER ADMIN', 'OWNER', 'ADMIN'].includes(req.user.role)) {
+  if (!['SUPER ADMIN', 'OWNER', 'ADMIN', 'SVP', 'SPV', 'KEPALA TOKO', 'HRD', 'SALES', 'KASIR', 'DRIVER'].includes(req.user.role)) {
     return res.status(403).json({ message: 'Hanya pengelola workspace yang dapat melanjutkan.' });
   }
   const status = subscriptionStatus({
@@ -285,12 +353,40 @@ app.use((req, res, next) => {
   next();
 });
 app.get('/api/system/status', (req, res) => {
+  const serverKey = configuredMidtransServerKey();
   res.json({
     otp: Boolean(process.env.SESSION_SECRET && process.env.SMTP_HOST && configuredSmtpUser() && process.env.SMTP_PASSWORD),
-    midtrans: Boolean(configuredMidtransServerKey()),
+    midtrans: Boolean(serverKey),
+    ...(serverKey
+      ? { midtransEnvironment: resolveMidtransEnvironment(serverKey, process.env.MIDTRANS_ENV) }
+      : {}),
   });
 });
+app.get('/api/public/workspace', async (req, res, next) => {
+  const slug = requestTenantSlug(req);
+  if (!slug) return res.status(404).json({ message: 'Workspace usaha tidak ditemukan.' });
+  try {
+    const result = await pool.query(
+      'SELECT name, theme_settings FROM companies WHERE slug = $1',
+      [slug],
+    );
+    if (!result.rowCount) return res.status(404).json({ message: 'Workspace usaha tidak ditemukan.' });
+    const themeSettings = result.rows[0].theme_settings || {};
+    return res.json({
+      workspace: {
+        name: result.rows[0].name,
+        logoUrl: typeof themeSettings.logoUrl === 'string' ? themeSettings.logoUrl : '',
+      },
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
 app.use('/uploads', express.static(uploadDirectory, { dotfiles: 'deny', index: false }));
+app.use('/api/dealer-motor', createDealerMotorRouter({
+  pool, authenticate, requireTenant, requireActiveTenant, requirePermission,
+  upload, privateDeliveryDirectory, fileTypeFromBuffer,
+}));
 app.use('/api/operations', createOperationsRouter({
   pool, authenticate, requireTenant, requireActiveTenant, requireRole,
 }));
@@ -338,12 +434,42 @@ app.post('/api/auth/request-otp', requestOtpLimit, async (req, res, next) => {
   if (hasBusinessSetup && !String(req.body.businessName).trim()) {
     return res.status(400).json({ message: 'Nama usaha wajib diisi.' });
   }
+  const tenantSlug = requestTenantSlug(req);
+  let invitedCompany = null;
+  const existingUserResult = await pool.query(
+    `SELECT u.company_id, u.active, u.approval_status, c.slug AS company_slug
+     FROM users u LEFT JOIN companies c ON c.id = u.company_id
+     WHERE u.email = $1`,
+    [email],
+  );
+  const existingUser = existingUserResult.rows[0];
+  if (tenantSlug) {
+    const tenantResult = await pool.query('SELECT id FROM companies WHERE slug = $1', [tenantSlug]);
+    if (!tenantResult.rowCount) return res.status(404).json({ message: 'Workspace usaha tidak ditemukan.' });
+    if (existingUser && existingUser.company_slug !== tenantSlug) {
+      return res.status(403).json({ message: 'Email ini sudah terhubung ke workspace usaha lain.' });
+    }
+  }
+  if (existingUser && !existingUser.active) {
+    return res.status(403).json({
+      message: existingUser.approval_status === 'pending'
+        ? 'Pendaftaran Anda masih menunggu persetujuan Owner atau Super Admin.'
+        : 'Akun ini tidak aktif. Hubungi Owner atau Super Admin workspace.',
+    });
+  }
   if (req.body.inviteToken) {
     const invite = await pool.query(
-      'SELECT 1 FROM team_invites WHERE token_hash = $1 AND consumed_at IS NULL AND expires_at > now()',
+      `SELECT c.id, c.slug FROM team_invites ti
+       JOIN companies c ON c.id = ti.company_id
+       WHERE ti.token_hash = $1 AND ti.consumed_at IS NULL AND ti.expires_at > now()`,
       [hash(String(req.body.inviteToken))],
     );
     if (!invite.rowCount) return res.status(400).json({ message: 'Link undangan tidak valid atau sudah kedaluwarsa.' });
+    invitedCompany = invite.rows[0];
+    if ((tenantSlug && invitedCompany.slug !== tenantSlug)
+      || (existingUser && existingUser.company_id !== invitedCompany.id)) {
+      return res.status(403).json({ message: 'Email atau link undangan tidak sesuai dengan workspace usaha ini.' });
+    }
   }
   const otp = `${randomInt(0, 1000000)}`.padStart(6, '0');
   const payload = {
@@ -354,6 +480,7 @@ app.post('/api/auth/request-otp', requestOtpLimit, async (req, res, next) => {
     modules: requestedModules,
     registration: hasRegistration,
     inviteToken: String(req.body.inviteToken || ''),
+    tenantSlug,
     isPlatformOwner,
   };
   try {
@@ -388,6 +515,15 @@ app.post('/api/auth/verify-otp', async (req, res, next) => {
       return res.status(400).json({ message: 'Kode OTP salah atau sudah kedaluwarsa.' });
     }
     const payload = challenge.payload;
+    const tenantSlug = requestTenantSlug(req);
+    if (String(payload.tenantSlug || '') !== String(tenantSlug || '')) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ message: 'Proses OTP harus diselesaikan pada workspace tempat pendaftaran dimulai.' });
+    }
+    if (tenantSlug && payload.isPlatformOwner) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ message: 'Akun platform harus masuk dari halaman utama KelolaUsaha.store.' });
+    }
     if (!constantTimeEqual(challenge.otp_hash, otpHash(email, otp))) {
       await client.query('UPDATE otp_challenges SET attempts = attempts + 1 WHERE id = $1', [challenge.id]);
       await client.query('COMMIT');
@@ -395,12 +531,55 @@ app.post('/api/auth/verify-otp', async (req, res, next) => {
     }
 
     let userResult = await client.query(
-      `SELECT id, company_id, name, email, role, permissions
-       FROM users WHERE email = $1 AND active = true`,
+      `SELECT id, company_id, name, email, role, permissions, active, approval_status
+       FROM users WHERE email = $1 FOR UPDATE`,
       [email],
     );
     let user = userResult.rows[0];
     let business;
+    let pendingApproval = false;
+    let invite;
+    if (payload.inviteToken) {
+      const inviteResult = await client.query(
+        `SELECT ti.*, c.slug AS company_slug FROM team_invites ti
+         JOIN companies c ON c.id = ti.company_id
+         WHERE ti.token_hash = $1 AND ti.consumed_at IS NULL AND ti.expires_at > now()
+         FOR UPDATE OF ti`,
+        [hash(payload.inviteToken)],
+      );
+      invite = inviteResult.rows[0];
+      if (!invite) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ message: 'Link undangan tidak valid atau sudah kedaluwarsa.' });
+      }
+      if (tenantSlug && invite.company_slug !== tenantSlug) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ message: 'Link undangan tidak sesuai dengan workspace usaha ini.' });
+      }
+      if (user && user.company_id !== invite.company_id) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ message: 'Email ini sudah terhubung ke workspace usaha lain.' });
+      }
+    }
+    if (user && user.company_id) {
+      const companyResult = await client.query('SELECT * FROM companies WHERE id = $1', [user.company_id]);
+      business = companyResult.rows[0];
+      if (tenantSlug && business?.slug !== tenantSlug) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ message: 'Akun ini tidak terdaftar pada workspace usaha tersebut.' });
+      }
+    }
+    if (user && !user.active) {
+      await client.query('UPDATE otp_challenges SET consumed_at = now() WHERE id = $1', [challenge.id]);
+      await client.query('COMMIT');
+      if (user.approval_status === 'pending') {
+        return res.status(202).json({
+          pendingApproval: true,
+          message: 'Pendaftaran Anda masih menunggu persetujuan Owner atau Super Admin.',
+        });
+      }
+      return res.status(403).json({ message: 'Akun ini tidak aktif. Hubungi Owner atau Super Admin workspace.' });
+    }
     if (!user && payload.isPlatformOwner) {
       const result = await client.query(
         `INSERT INTO users (name, email, role, permissions)
@@ -409,16 +588,6 @@ app.post('/api/auth/verify-otp', async (req, res, next) => {
       );
       user = result.rows[0];
     } else if (!user && payload.inviteToken) {
-      const inviteResult = await client.query(
-        `SELECT * FROM team_invites WHERE token_hash = $1 AND consumed_at IS NULL AND expires_at > now()
-         FOR UPDATE`,
-        [hash(payload.inviteToken)],
-      );
-      const invite = inviteResult.rows[0];
-      if (!invite) {
-        await client.query('ROLLBACK');
-        return res.status(400).json({ message: 'Link undangan tidak valid atau sudah kedaluwarsa.' });
-      }
       const branchResult = invite.branch_id
         ? { rows: [{ id: invite.branch_id }] }
         : await client.query(
@@ -426,13 +595,44 @@ app.post('/api/auth/verify-otp', async (req, res, next) => {
           [invite.company_id],
         );
       const result = await client.query(
-        `INSERT INTO users (company_id, branch_id, name, email, phone, role, permissions)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `INSERT INTO users (
+           company_id, branch_id, name, email, phone, role, permissions, active, approval_status
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, false, 'pending')
          RETURNING id, company_id, name, email, role, permissions`,
         [invite.company_id, branchResult.rows[0]?.id, payload.name || email, email, payload.phone, invite.role, JSON.stringify(permissionSets[invite.role] || [])],
       );
       user = result.rows[0];
       await client.query('UPDATE team_invites SET consumed_at = now() WHERE token_hash = $1', [invite.token_hash]);
+      pendingApproval = true;
+    } else if (!user && payload.tenantSlug && payload.registration) {
+      const companyResult = await client.query(
+        'SELECT id FROM companies WHERE slug = $1 FOR UPDATE',
+        [payload.tenantSlug],
+      );
+      if (!companyResult.rowCount) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ message: 'Workspace usaha tidak ditemukan.' });
+      }
+      const branchResult = await client.query(
+        'SELECT id FROM business_branches WHERE company_id = $1 AND is_primary = true',
+        [companyResult.rows[0].id],
+      );
+      const result = await client.query(
+        `INSERT INTO users (
+           company_id, branch_id, name, email, phone, role, permissions, active, approval_status
+         ) VALUES ($1, $2, $3, $4, $5, 'SALES', $6, false, 'pending')
+         RETURNING id, company_id, name, email, role, permissions`,
+        [
+          companyResult.rows[0].id,
+          branchResult.rows[0]?.id,
+          payload.name || email,
+          email,
+          payload.phone,
+          JSON.stringify(permissionSets.SALES),
+        ],
+      );
+      user = result.rows[0];
+      pendingApproval = true;
     } else if (!user && payload.registration && !payload.businessName) {
       const result = await client.query(
         `INSERT INTO users (name, email, phone, role, permissions)
@@ -443,10 +643,11 @@ app.post('/api/auth/verify-otp', async (req, res, next) => {
       user = result.rows[0];
     } else if (!user && payload.businessName) {
       const trialEnd = trialEndsAt(new Date());
+      const slug = await uniqueBusinessSlug(client, payload.businessName);
       const companyResult = await client.query(
-        `INSERT INTO companies (name, business_type, modules, trial_ends_at)
-         VALUES ($1, $2, $3, $4) RETURNING *`,
-        [payload.businessName, payload.businessType, JSON.stringify(payload.modules), trialEnd],
+        `INSERT INTO companies (name, slug, business_type, modules, trial_ends_at)
+         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+        [payload.businessName, slug, payload.businessType, JSON.stringify(payload.modules), trialEnd],
       );
       business = companyResult.rows[0];
       const branchResult = await client.query(
@@ -475,6 +676,13 @@ app.post('/api/auth/verify-otp', async (req, res, next) => {
       business = companyResult.rows[0];
     }
     await client.query('UPDATE otp_challenges SET consumed_at = now() WHERE id = $1', [challenge.id]);
+    if (pendingApproval) {
+      await client.query('COMMIT');
+      return res.status(202).json({
+        pendingApproval: true,
+        message: 'Pendaftaran berhasil. Akun Anda dapat digunakan setelah disetujui Owner atau Super Admin.',
+      });
+    }
     const sessionToken = randomBytes(32).toString('base64url');
     await client.query(
       `INSERT INTO sessions (token_hash, user_id, expires_at)
@@ -485,7 +693,7 @@ app.post('/api/auth/verify-otp', async (req, res, next) => {
     setSessionCookie(res, sessionToken);
     return res.json({
       user: { ...user, permissions: user.permissions },
-      ...(business ? { business: publicBusiness(business) } : {}),
+      ...(business ? { business: publicBusiness(business, req) } : {}),
     });
   } catch (error) {
     await client.query('ROLLBACK');
@@ -497,10 +705,13 @@ app.post('/api/auth/verify-otp', async (req, res, next) => {
 
 app.post('/api/auth/setup-business', authenticate, requireRole('OWNER'), async (req, res, next) => {
   const businessName = String(req.body?.businessName || '').trim();
+  const businessAddress = String(req.body?.businessAddress || '').trim();
   const businessType = String(req.body?.businessType || '');
   const modules = req.body?.modules;
-  if (!businessName || businessName.length > 160 || !businessTypeIds.has(businessType)) {
-    return res.status(400).json({ message: 'Nama atau jenis usaha tidak valid.' });
+  if (!businessName || businessName.length > 160
+    || !businessAddress || businessAddress.length > 500
+    || !businessTypeIds.has(businessType)) {
+    return res.status(400).json({ message: 'Nama, alamat, atau jenis usaha tidak valid.' });
   }
   const allowedModules = new Set(businessTypes[businessType].modules.map(([id]) => id));
   if (!Array.isArray(modules)
@@ -528,16 +739,22 @@ app.post('/api/auth/setup-business', authenticate, requireRole('OWNER'), async (
     }
 
     const companyResult = await client.query(
-      `INSERT INTO companies (name, business_type, modules, trial_ends_at)
-       VALUES ($1, $2, $3, $4) RETURNING *`,
-      [businessName, businessType, JSON.stringify(modules), trialEndsAt(new Date())],
+      `INSERT INTO companies (name, slug, business_type, modules, trial_ends_at)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [
+        businessName,
+        await uniqueBusinessSlug(client, businessName),
+        businessType,
+        JSON.stringify(modules),
+        trialEndsAt(new Date()),
+      ],
     );
     const business = companyResult.rows[0];
     const branchResult = await client.query(
-      `INSERT INTO business_branches (company_id, name, code, is_primary)
-       VALUES ($1, 'Cabang Utama', 'PUSAT', true)
+      `INSERT INTO business_branches (company_id, name, code, address, is_primary)
+       VALUES ($1, 'Cabang Utama', 'PUSAT', $2, true)
        RETURNING id`,
-      [business.id],
+      [business.id, businessAddress],
     );
     await client.query('INSERT INTO attendance_settings (company_id) VALUES ($1)', [business.id]);
     const updatedUserResult = await client.query(
@@ -549,7 +766,7 @@ app.post('/api/auth/setup-business', authenticate, requireRole('OWNER'), async (
     await client.query('COMMIT');
     return res.status(201).json({
       user: updatedUserResult.rows[0],
-      business: publicBusiness(business),
+      business: publicBusiness(business, req),
     });
   } catch (error) {
     await client.query('ROLLBACK');
@@ -573,7 +790,7 @@ app.get('/api/auth/session', authenticate, async (req, res, next) => {
         role: req.user.role,
         permissions: req.user.permissions,
       },
-      ...(company ? { business: publicBusiness(company) } : {}),
+      ...(company ? { business: publicBusiness(company, req) } : {}),
     });
   } catch (error) {
     next(error);
@@ -593,9 +810,9 @@ app.post('/api/auth/logout', authenticate, async (req, res, next) => {
 app.post('/api/team/invites', authenticate, requireRole('OWNER', 'SUPER ADMIN'), requireTenant, requireActiveTenant, async (req, res, next) => {
   const role = String(req.body.role || '');
   const allowedRoles = req.user.role === 'OWNER'
-    ? ['SUPER ADMIN', 'HRD', 'SVP', 'SPV', 'KEPALA TOKO', 'ADMIN', 'SALES', 'KASIR']
-    : ['HRD', 'SVP', 'SPV', 'KEPALA TOKO', 'ADMIN', 'SALES', 'KASIR'];
-  const branchId = req.body.branchId ? String(req.body.branchId) : null;
+    ? ['SUPER ADMIN', 'HRD', 'SVP', 'SPV', 'KEPALA TOKO', 'ADMIN', 'SALES', 'KASIR', 'DRIVER']
+    : ['HRD', 'SVP', 'SPV', 'KEPALA TOKO', 'ADMIN', 'SALES', 'KASIR', 'DRIVER'];
+  let branchId = req.body.branchId ? String(req.body.branchId) : null;
   if (!allowedRoles.includes(role) || (branchId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(branchId))) {
     return res.status(400).json({ message: 'Peran undangan tidak valid.' });
   }
@@ -606,6 +823,12 @@ app.post('/api/team/invites', authenticate, requireRole('OWNER', 'SUPER ADMIN'),
         [branchId, req.user.company_id],
       );
       if (!branch.rowCount) return res.status(404).json({ message: 'Cabang tidak ditemukan.' });
+    } else {
+      const primaryBranch = await pool.query(
+        'SELECT id FROM business_branches WHERE company_id = $1 AND is_primary = true AND active = true',
+        [req.user.company_id],
+      );
+      branchId = primaryBranch.rows[0]?.id || null;
     }
     const token = randomBytes(32).toString('base64url');
     await pool.query(
@@ -613,10 +836,50 @@ app.post('/api/team/invites', authenticate, requireRole('OWNER', 'SUPER ADMIN'),
        VALUES ($1, $2, $3, $4, now() + interval '7 days')`,
       [hash(token), req.user.company_id, branchId, role],
     );
-    const origin = paymentOrigin(req);
-    res.json({ inviteUrl: `${origin}/?invite=${token}` });
+    const origin = workspaceUrlFor(req.user.company_slug, appRootOrigin(req));
+    res.json({ inviteUrl: `${origin}/?invite=${token}`, workspaceUrl: origin });
   } catch (error) {
     next(error);
+  }
+});
+
+app.get('/api/team/members', authenticate, requireRole('OWNER', 'SUPER ADMIN'), requireTenant, requireActiveTenant, async (req, res, next) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, name, email, role, permissions, active,
+              approval_status AS "approvalStatus", created_at AS "createdAt"
+       FROM users WHERE company_id = $1
+       ORDER BY CASE WHEN approval_status = 'pending' THEN 0 ELSE 1 END, created_at DESC`,
+      [req.user.company_id],
+    );
+    res.json({ users: result.rows });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/team/members/:id/approval', authenticate, requireRole('OWNER', 'SUPER ADMIN'), requireTenant, requireActiveTenant, async (req, res, next) => {
+  const decision = req.body?.decision;
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(req.params.id)
+    || !['approve', 'reject'].includes(decision)) {
+    return res.status(400).json({ message: 'Keputusan persetujuan tidak valid.' });
+  }
+  try {
+    const result = await pool.query(
+      `UPDATE users
+       SET approval_status = $1, active = $2
+       WHERE id = $3 AND company_id = $4 AND role NOT IN ('OWNER', 'PLATFORM_OWNER')
+         AND approval_status = 'pending'
+       RETURNING id, name, email, role, permissions, active,
+                 approval_status AS "approvalStatus", created_at AS "createdAt"`,
+      [decision === 'approve' ? 'approved' : 'rejected', decision === 'approve', req.params.id, req.user.company_id],
+    );
+    if (!result.rowCount) {
+      return res.status(404).json({ message: 'Pendaftaran menunggu persetujuan tidak ditemukan di workspace ini.' });
+    }
+    return res.json({ user: result.rows[0] });
+  } catch (error) {
+    return next(error);
   }
 });
 
@@ -703,7 +966,7 @@ app.get('/api/finance/entries', authenticate, requireRole('OWNER'), requireTenan
     const result = await pool.query(
       `SELECT e.id, e.branch_id AS "branchId", b.name AS "branchName",
               e.entry_type AS type, e.category, e.description, e.amount,
-              e.entry_date AS "entryDate", e.created_at AS "createdAt"
+              to_char(e.entry_date, 'YYYY-MM-DD') AS "entryDate", e.created_at AS "createdAt"
        FROM company_ledger_entries e
        JOIN business_branches b ON b.id = e.branch_id AND b.company_id = e.company_id
        WHERE e.company_id = $1
@@ -746,7 +1009,7 @@ app.post('/api/finance/entries', authenticate, requireRole('OWNER'), requireTena
       `INSERT INTO company_ledger_entries (company_id, branch_id, created_by, entry_type, category, description, amount, entry_date)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING id, branch_id AS "branchId", entry_type AS type, category, description, amount,
-                 entry_date AS "entryDate", created_at AS "createdAt"`,
+                 to_char(entry_date, 'YYYY-MM-DD') AS "entryDate", created_at AS "createdAt"`,
       [req.user.company_id, branchId, req.user.id, type, category.trim(), description.trim(), amount, entryDate],
     );
     res.status(201).json({ entry: result.rows[0] });
@@ -774,7 +1037,7 @@ app.get('/api/billing/status', authenticate, requireRole('OWNER'), requireTenant
     ]);
     if (!companyResult.rowCount) return res.status(404).json({ message: 'Workspace tidak ditemukan.' });
     res.json({
-      business: publicBusiness(companyResult.rows[0]),
+      business: publicBusiness(companyResult.rows[0], req),
       orders: orderResult.rows,
       notifications: notificationResult.rows,
       plans,
@@ -806,7 +1069,10 @@ app.post('/api/billing/branch-addon/checkout', authenticate, requireRole('OWNER'
        VALUES ($1, $2, $3, $4, 'branch_addon', $5, $6)`,
       [company.id, `branch_${addon.months || 'lifetime'}`, amount, orderId, quantity, addon.months],
     );
-    const sandbox = process.env.MIDTRANS_ENV !== 'production';
+    const sandbox = resolveMidtransEnvironment(
+      configuredMidtransServerKey(),
+      process.env.MIDTRANS_ENV,
+    ) === 'sandbox';
     const baseUrl = sandbox ? 'https://app.sandbox.midtrans.com' : 'https://app.midtrans.com';
     const authorization = Buffer.from(`${configuredMidtransServerKey()}:`).toString('base64');
     const response = await fetch(`${baseUrl}/snap/v1/transactions`, {
@@ -828,7 +1094,7 @@ app.post('/api/billing/branch-addon/checkout', authenticate, requireRole('OWNER'
       const errorText = await response.text();
       await pool.query(`UPDATE billing_orders SET status = 'failed' WHERE midtrans_order_id = $1`, [orderId]);
       console.error(`Midtrans Snap rejected branch add-on ${orderId}: ${response.status} ${errorText}`);
-      return res.status(502).json({ message: 'Midtrans tidak dapat membuat pembayaran. Silakan coba lagi.' });
+      return res.status(502).json({ message: midtransFailureMessage(response.status, errorText) });
     }
     const result = await response.json();
     await pool.query(
@@ -857,7 +1123,10 @@ app.post('/api/billing/checkout', authenticate, requireRole('OWNER'), requireTen
        VALUES ($1, $2, $3, $4)`,
       [company.id, plan.id, plan.amount, orderId],
     );
-    const sandbox = process.env.MIDTRANS_ENV !== 'production';
+    const sandbox = resolveMidtransEnvironment(
+      configuredMidtransServerKey(),
+      process.env.MIDTRANS_ENV,
+    ) === 'sandbox';
     const baseUrl = sandbox ? 'https://app.sandbox.midtrans.com' : 'https://app.midtrans.com';
     const authorization = Buffer.from(`${configuredMidtransServerKey()}:`).toString('base64');
     const response = await fetch(`${baseUrl}/snap/v1/transactions`, {
@@ -874,7 +1143,7 @@ app.post('/api/billing/checkout', authenticate, requireRole('OWNER'), requireTen
       const errorText = await response.text();
       await pool.query(`UPDATE billing_orders SET status = 'failed' WHERE midtrans_order_id = $1`, [orderId]);
       console.error(`Midtrans Snap rejected order ${orderId}: ${response.status} ${errorText}`);
-      return res.status(502).json({ message: 'Midtrans tidak dapat membuat pembayaran. Silakan coba lagi.' });
+      return res.status(502).json({ message: midtransFailureMessage(response.status, errorText) });
     }
     const result = await response.json();
     await pool.query(

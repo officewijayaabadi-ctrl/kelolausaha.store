@@ -70,7 +70,10 @@ test('allows an Owner to invite a Super Admin but limits Super Admin invites to 
   expect(inviteRole.value).toBe('SUPER ADMIN');
   fireEvent.click(screen.getByRole('button', { name: /buat link pendaftaran/i }));
   await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-  expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ role: 'SUPER ADMIN' });
+  expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
+    role: 'SUPER ADMIN',
+    branchId: 'preview-branch-primary',
+  });
 });
 
 test('customizes and saves a company dashboard theme in the demo browser', () => {
@@ -213,6 +216,8 @@ test('verifies email first, then creates a business with its selected modules', 
         business: {
           id: 'company-retail',
           name: 'Toko Rani',
+          slug: 'toko-rani',
+          workspaceUrl: 'https://toko-rani.kelolausaha.store',
           type: 'retail',
           modules: ['dashboard', 'pos'],
           subscription: {
@@ -244,9 +249,13 @@ test('verifies email first, then creates a business with its selected modules', 
   fireEvent.click(screen.getByRole('button', { name: /verifikasi email/i }));
   await waitFor(() => expect(screen.getByRole('heading', { name: 'Siapkan usaha Anda' })).toBeDefined());
   fireEvent.change(screen.getByLabelText('Nama usaha'), { target: { value: 'Toko Rani' } });
+  fireEvent.change(screen.getByLabelText('Alamat usaha'), { target: { value: 'Jalan Merdeka 10, Bojonegoro' } });
   fireEvent.change(screen.getByLabelText('Jenis usaha'), { target: { value: 'retail' } });
   fireEvent.click(screen.getByLabelText('Data pelanggan'));
   fireEvent.click(screen.getByRole('button', { name: /buat workspace usaha/i }));
+  await waitFor(() => expect(screen.getByLabelText('Link workspace usaha').value)
+    .toBe('https://toko-rani.kelolausaha.store'));
+  fireEvent.click(screen.getByRole('button', { name: /Buka workspace/ }));
   await waitFor(() => expect(screen.getByRole('heading', { name: 'Dashboard' })).toBeDefined());
   expect(screen.getByText('Rani WAM')).toBeDefined();
   expect(screen.getByRole('status', { name: 'Hitung mundur masa demo' })).toBeDefined();
@@ -259,6 +268,7 @@ test('verifies email first, then creates a business with its selected modules', 
   expect(setupCall).toBeDefined();
   const setupPayload = JSON.parse(setupCall[1].body);
   expect(setupPayload.businessName).toBe('Toko Rani');
+  expect(setupPayload.businessAddress).toBe('Jalan Merdeka 10, Bojonegoro');
   expect(setupPayload.businessType).toBe('retail');
   expect(setupPayload.modules).not.toContain('customers');
 });
@@ -280,7 +290,22 @@ test('creates an employee registration link through the server', async () => {
 
   await waitFor(() => expect(screen.getByLabelText('Link pendaftaran karyawan').value)
     .toBe('https://kelolausaha.store/?invite=abc123'));
-  expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({ role: 'ADMIN' });
+  expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({
+    role: 'ADMIN',
+    branchId: 'preview-branch-primary',
+  });
+});
+
+test('menu navigation updates the URL and exposes delivery only to drivers', () => {
+  render(<App />);
+  openOwnerPreview();
+  fireEvent.change(screen.getByRole('combobox', { name: 'Pilih akun demo' }), {
+    target: { value: 'user-6' },
+  });
+  expect(screen.getByRole('button', { name: 'Pengiriman' })).toBeDefined();
+  fireEvent.click(screen.getByRole('button', { name: 'Pengiriman' }));
+  expect(window.location.hash).toBe('#/Pengiriman');
+  expect(screen.getByText(/Masuk dengan akun DRIVER/)).toBeDefined();
 });
 
 test('does not show the OTP step when the email service rejects a request', async () => {
@@ -320,6 +345,32 @@ test('opens the employee registration form from an invite link', async () => {
   expect(JSON.parse(fetchMock.mock.calls[1][1].body).inviteToken).toBe('abc123');
 });
 
+test('shows pending approval after employee OTP verification without opening a session', async () => {
+  window.history.pushState({}, '', '/?invite=abc123');
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce({ ok: false, status: 401, json: async () => ({}) })
+    .mockResolvedValueOnce({ ok: true, json: async () => ({}) })
+    .mockResolvedValueOnce({
+      ok: true,
+      status: 202,
+      json: async () => ({
+        pendingApproval: true,
+        message: 'Pendaftaran berhasil. Akun Anda dapat digunakan setelah disetujui Owner atau Super Admin.',
+      }),
+    });
+  vi.stubGlobal('fetch', fetchMock);
+  render(<App />);
+  fireEvent.change(screen.getByLabelText('Nama lengkap'), { target: { value: 'Rani Karyawan' } });
+  fireEvent.change(screen.getByLabelText('Nomor HP'), { target: { value: '081234567890' } });
+  fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'rani@wam.co.id' } });
+  fireEvent.click(screen.getByRole('button', { name: /kirim kode otp/i }));
+  await waitFor(() => expect(screen.getByRole('heading', { name: 'Cek email Anda' })).toBeDefined());
+  fireEvent.change(screen.getByLabelText('Kode OTP'), { target: { value: '123456' } });
+  fireEvent.click(screen.getByRole('button', { name: /verifikasi email/i }));
+  expect((await screen.findByRole('status')).textContent).toContain('Pendaftaran berhasil.');
+  expect(screen.queryByRole('heading', { name: 'Dashboard' })).toBeNull();
+});
+
 test('creates a POS receipt and prepares its WhatsApp share message', async () => {
   render(<App />);
   openOwnerPreview();
@@ -355,6 +406,147 @@ test('creates a POS receipt and prepares its WhatsApp share message', async () =
   print.mockRestore();
 });
 
+test('creates and prints a motorcycle purchase receipt from submitted SPK data', async () => {
+  render(<App />);
+  openOwnerPreview();
+  fireEvent.change(screen.getByRole('combobox', { name: 'Pilih akun demo' }), {
+    target: { value: 'user-4' },
+  });
+  fireEvent.click(screen.getAllByRole('button', { name: /Buat SPK baru/ })[0]);
+  await screen.findByRole('heading', { name: 'Input SPK' });
+  fireEvent.change(screen.getByLabelText(/Unit motor dari stok/), { target: { value: 'preview-unit-vario-160' } });
+  fireEvent.change(screen.getByLabelText(/Sales/), { target: { value: 'Rizky Pratama' } });
+  fireEvent.change(screen.getByLabelText(/NIK/), { target: { value: '1234567890123456' } });
+  fireEvent.change(screen.getByLabelText(/Nama lengkap/), { target: { value: 'Budi Santoso' } });
+  fireEvent.change(screen.getByLabelText(/Nomor WhatsApp/), { target: { value: '081234567890' } });
+  fireEvent.change(screen.getByLabelText(/Alamat/), { target: { value: 'Jalan Merdeka 10, Bojonegoro' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Tunai / Cash' }));
+  fireEvent.change(screen.getByLabelText('Jumlah uang diterima kwitansi'), { target: { value: '25300000' } });
+  fireEvent.change(screen.getByLabelText(/Kota penerbit kwitansi/), { target: { value: 'Bojonegoro' } });
+  fireEvent.change(screen.getByLabelText('Atas nama STNK'), { target: { value: 'Budi Santoso' } });
+  fireEvent.click(screen.getByRole('button', { name: /submit spk/i }));
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Nota Digital' }));
+  expect(screen.getByText('KWITANSI')).toBeDefined();
+  expect(screen.getByText('dua puluh lima juta tiga ratus ribu rupiah')).toBeDefined();
+  expect(screen.getByText('MH1ABC12345678901')).toBeDefined();
+  expect(screen.getByText('ABC1234567')).toBeDefined();
+  expect(screen.getAllByText('Budi Santoso').length).toBeGreaterThan(0);
+  const shareUrl = new URL(screen.getByRole('link', { name: /kirim kwitansi via whatsapp/i }).href);
+  expect(shareUrl.hostname).toBe('wa.me');
+  expect(shareUrl.searchParams.get('text')).toContain('No. Rangka: MH1ABC12345678901');
+
+  const print = vi.spyOn(window, 'print').mockImplementation(() => {});
+  fireEvent.click(screen.getByRole('button', { name: 'Cetak kwitansi' }));
+  await waitFor(() => expect(print).toHaveBeenCalledOnce());
+  print.mockRestore();
+});
+
+test('allows SPK verification and approval only for the matching permissions', () => {
+  render(<App />);
+  openOwnerPreview();
+  fireEvent.change(screen.getByRole('combobox', { name: 'Pilih akun demo' }), {
+    target: { value: 'user-4' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Verifikasi SPK' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Verifikasi SPK SPK-WAM-20261119-0008' }));
+  expect(screen.getAllByText('APPROVAL SVP').length).toBeGreaterThan(0);
+  expect(screen.queryByRole('button', { name: /Setujui SPK/ })).toBeNull();
+
+  fireEvent.change(screen.getByRole('combobox', { name: 'Pilih akun demo' }), {
+    target: { value: 'user-3' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: /Approval/ }));
+  expect(screen.getByRole('button', { name: 'Setujui SPK SPK-WAM-20261120-0003' })).toBeDefined();
+  expect(screen.queryByRole('button', { name: /Verifikasi SPK SPK-/ })).toBeNull();
+});
+
+test('keeps bookkeeping visible after saving a note with a server date timestamp', async () => {
+  const branchId = '123e4567-e89b-12d3-a456-426614174000';
+  const savedEntry = {
+    id: 'entry-1',
+    branchId,
+    type: 'expense',
+    category: 'Operasional',
+    description: 'Catatan uji',
+    amount: '125000',
+    entryDate: '2026-11-22T00:00:00.000Z',
+    createdAt: '2026-11-22T10:00:00.000Z',
+  };
+  const fetchMock = vi.fn(async (url, options = {}) => {
+    if (url === '/api/auth/session') {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          user: {
+            id: 'owner-1',
+            name: 'Rika Wijaya',
+            email: 'rika@example.test',
+            role: 'OWNER',
+            permissions: ['dashboard', 'financeView', 'financeManage'],
+          },
+          business: { id: 'company-1', name: 'Usaha Contoh' },
+        }),
+      };
+    }
+    if (url === '/api/team/members') {
+      return {
+        ok: true,
+        json: async () => ({
+          users: [{
+            id: 'owner-1',
+            name: 'Rika Wijaya',
+            email: 'rika@example.test',
+            role: 'OWNER',
+            permissions: ['dashboard', 'financeView', 'financeManage'],
+            active: true,
+          }],
+        }),
+      };
+    }
+    if (url === '/api/finance/entries' && options.method === 'POST') {
+      return { ok: true, json: async () => ({ entry: savedEntry }) };
+    }
+    if (url === '/api/finance/entries') {
+      return { ok: true, json: async () => ({ entries: [] }) };
+    }
+    if (url === '/api/workspace/operations/branches') {
+      return {
+        ok: true,
+        json: async () => ({
+          branches: [{ id: branchId, name: 'Cabang Utama', isPrimary: true }],
+        }),
+      };
+    }
+    if (url === '/api/billing/status') {
+      return {
+        ok: true,
+        json: async () => ({
+          business: { subscription: { status: 'trial' }, themeSettings: {} },
+          notifications: [],
+        }),
+      };
+    }
+    return { ok: false, status: 404, json: async () => ({ message: 'Not found' }) };
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  render(<App />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Pembukuan' }));
+  await screen.findByRole('option', { name: 'Cabang Utama' });
+  fireEvent.change(screen.getByLabelText('Kategori'), { target: { value: 'Operasional' } });
+  fireEvent.change(screen.getByLabelText('Keterangan'), { target: { value: 'Catatan uji' } });
+  fireEvent.change(screen.getByLabelText('Nominal pembukuan'), { target: { value: '125000' } });
+  fireEvent.change(screen.getByLabelText('Jenis'), { target: { value: 'expense' } });
+  fireEvent.click(screen.getByRole('button', { name: /Simpan catatan/ }));
+
+  expect(await screen.findByText('Catatan uji')).toBeDefined();
+  expect(screen.getByRole('heading', { name: 'Pembukuan & laba rugi' })).toBeDefined();
+  expect(screen.getAllByText('Cabang Utama').length).toBeGreaterThan(0);
+  expect(fetchMock.mock.calls.find(([, options]) => options?.method === 'POST')?.[1].body)
+    .toContain(branchId);
+});
+
 test('routes a restaurant digital order through cashier, kitchen, waiter, payment, and WhatsApp receipt', async () => {
   const fetchMock = vi.fn(async (url) => {
     if (url === '/api/auth/session') return { ok: false, status: 401, json: async () => ({}) };
@@ -374,6 +566,8 @@ test('routes a restaurant digital order through cashier, kitchen, waiter, paymen
           business: {
             id: 'restaurant-company',
             name: 'Kafe Rani',
+            slug: 'kafe-rani',
+            workspaceUrl: 'https://kafe-rani.kelolausaha.store',
             type: 'restaurant',
             modules: ['dashboard', 'products', 'prices', 'pos', 'transactions', 'digital_receipts', 'menu', 'orders', 'tables', 'suppliers', 'sales_reports', 'employees'],
           },
@@ -394,8 +588,12 @@ test('routes a restaurant digital order through cashier, kitchen, waiter, paymen
   fireEvent.click(screen.getByRole('button', { name: /verifikasi email/i }));
   await waitFor(() => expect(screen.getByRole('heading', { name: 'Siapkan usaha Anda' })).toBeDefined());
   fireEvent.change(screen.getByLabelText('Nama usaha'), { target: { value: 'Kafe Rani' } });
+  fireEvent.change(screen.getByLabelText('Alamat usaha'), { target: { value: 'Jalan Kuliner 5, Jakarta' } });
   fireEvent.change(screen.getByLabelText('Jenis usaha'), { target: { value: 'restaurant' } });
   fireEvent.click(screen.getByRole('button', { name: /buat workspace usaha/i }));
+  await waitFor(() => expect(screen.getByLabelText('Link workspace usaha').value)
+    .toBe('https://kafe-rani.kelolausaha.store'));
+  fireEvent.click(screen.getByRole('button', { name: /Buka workspace/ }));
   await waitFor(() => expect(screen.getByRole('heading', { name: 'Dashboard' })).toBeDefined());
   await waitFor(() => expect(screen.queryByText('Memuat ringkasan operasional…')).toBeNull());
 
