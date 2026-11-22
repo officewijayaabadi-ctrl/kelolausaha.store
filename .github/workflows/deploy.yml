@@ -15,6 +15,7 @@ on:
           - deploy
           - inspect_tls
           - setup_tenant_tls
+          - show_tenant_tls_challenge
         default: deploy
 
 permissions:
@@ -64,6 +65,7 @@ jobs:
             CERT_NAME=kelolausaha-tenant-wildcard
             CERT_DIR="/etc/letsencrypt/live/$CERT_NAME"
             HOOK=/usr/local/sbin/kelolausaha-tenant-wildcard-auth-v1.py
+            CHALLENGE_FILE=/run/kelolausaha-tenant-tls/dns-challenge.txt
             CONFIG=/etc/nginx/sites-available/kelolausaha-tenant-wildcard
             ENABLED=/etc/nginx/sites-enabled/kelolausaha-tenant-wildcard
 
@@ -94,6 +96,7 @@ jobs:
             # KelolaUsaha tenant wildcard DNS hook
             import json
             import os
+            from pathlib import Path
             import time
             import urllib.error
             import urllib.parse
@@ -104,6 +107,14 @@ jobs:
             record = f"_acme-challenge.{domain}"
             query = urllib.parse.urlencode({"name": record, "type": "TXT"})
             url = f"https://dns.google/resolve?{query}"
+            challenge_file = Path("/run/kelolausaha-tenant-tls/dns-challenge.txt")
+            challenge_file.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            challenge_file.write_text(
+                f"Type: TXT\nName/Host: _acme-challenge\nFQDN: {record}\n"
+                f"Value: {token}\nTTL: 300 (or the lowest available)\n",
+                encoding="utf-8",
+            )
+            challenge_file.chmod(0o600)
 
             print("Add this temporary DNS record at Rumahweb, then leave it in place until issuance completes:", flush=True)
             print(f"Type: TXT\nName/Host: _acme-challenge\nFQDN: {record}\nValue: {token}\nTTL: 300 (or the lowest available)", flush=True)
@@ -145,6 +156,9 @@ jobs:
                 --manual-public-ip-logging-ok
             fi
 
+            if sudo test -f "$CHALLENGE_FILE"; then
+              sudo rm "$CHALLENGE_FILE"
+            fi
             sudo tee "$CONFIG" >/dev/null <<'NGINX'
             # KelolaUsaha tenant wildcard only; does not change other vhosts.
             server {
@@ -206,6 +220,49 @@ jobs:
             fi
             sudo systemctl reload nginx
             echo "Tenant wildcard TLS is active; existing website vhosts were not modified."
+      - name: Show pending tenant DNS challenge
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.action == 'show_tenant_tls_challenge' }}
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          script: |
+            set -eu
+            CHALLENGE_FILE=/run/kelolausaha-tenant-tls/dns-challenge.txt
+            if sudo test -s "$CHALLENGE_FILE"; then
+              sudo cat "$CHALLENGE_FILE"
+              exit 0
+            fi
+            sudo python3 - <<'PY'
+            from pathlib import Path
+
+            hook = "/usr/local/sbin/kelolausaha-tenant-wildcard-auth-v1.py"
+            for process in Path("/proc").glob("[0-9]*"):
+                try:
+                    command = (process / "cmdline").read_bytes().replace(b"\0", b" ").decode()
+                    if hook not in command:
+                        continue
+                    entries = (process / "environ").read_bytes().split(b"\0")
+                    environment = {
+                        key.decode(): value.decode()
+                        for entry in entries if b"=" in entry
+                        for key, value in [entry.split(b"=", 1)]
+                    }
+                    domain = environment.get("CERTBOT_DOMAIN", "").lstrip("*.")
+                    token = environment.get("CERTBOT_VALIDATION")
+                    if token:
+                        print("Type: TXT")
+                        print("Name/Host: _acme-challenge")
+                        print(f"FQDN: _acme-challenge.{domain}")
+                        print(f"Value: {token}")
+                        print("TTL: 300 (or the lowest available)")
+                        raise SystemExit(0)
+                except (OSError, UnicodeDecodeError, PermissionError):
+                    continue
+            raise SystemExit("No tenant DNS challenge is currently pending.")
+            PY
       - name: Deploy through SSH
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.action == 'deploy' }}
         uses: appleboy/ssh-action@v1.2.0
