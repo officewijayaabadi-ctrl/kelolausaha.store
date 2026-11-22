@@ -193,23 +193,38 @@ test('allows Super Admin to set permissions for an individual user', () => {
   expect(screen.getByRole('heading', { name: 'Laporan Penjualan' })).toBeDefined();
 });
 
-test('registers a business with a customizable industry structure and verifies by email OTP', async () => {
-  const fetchMock = vi.fn()
-    .mockResolvedValueOnce({ ok: false, status: 401, json: async () => ({}) })
-    .mockResolvedValueOnce({ ok: true, json: async () => ({}) })
-    .mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
+test('verifies email first, then creates a business with its selected modules', async () => {
+  const fetchMock = vi.fn(async (url) => {
+    if (url === '/api/auth/session') return { ok: false, status: 401, json: async () => ({}) };
+    if (url === '/api/auth/request-otp') return { ok: true, json: async () => ({}) };
+    if (url === '/api/auth/verify-otp') {
+      return {
+        ok: true,
+        json: async () => ({
+          user: { id: 'new-owner', name: 'Rani WAM', email: 'rani@wam.co.id', role: 'OWNER' },
+        }),
+      };
+    }
+    if (url === '/api/auth/setup-business') {
+      return {
+        ok: true,
+        json: async () => ({
         user: { id: 'new-owner', name: 'Rani WAM', email: 'rani@wam.co.id', role: 'OWNER' },
         business: {
+          id: 'company-retail',
           name: 'Toko Rani',
+          type: 'retail',
+          modules: ['dashboard', 'pos'],
           subscription: {
             status: 'trial',
             trialEndsAt: new Date(Date.now() + 30 * 86400000).toISOString(),
           },
         },
-      }),
-    });
+        }),
+      };
+    }
+    return { ok: true, json: async () => ({}) };
+  });
   vi.stubGlobal('fetch', fetchMock);
   render(<App />);
   fireEvent.click(screen.getByRole('link', { name: /daftar/i }));
@@ -218,26 +233,34 @@ test('registers a business with a customizable industry structure and verifies b
   fireEvent.change(screen.getByLabelText('Nama lengkap'), { target: { value: 'Rani WAM' } });
   fireEvent.change(screen.getByLabelText('Nomor HP'), { target: { value: '081234567890' } });
   fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'rani@wam.co.id' } });
-  fireEvent.change(screen.getByLabelText('Nama usaha'), { target: { value: 'Toko Rani' } });
-  fireEvent.change(screen.getByLabelText('Jenis usaha'), { target: { value: 'retail' } });
-  fireEvent.click(screen.getByLabelText('Data pelanggan'));
   fireEvent.click(screen.getByRole('button', { name: /kirim kode otp/i }));
 
   await waitFor(() => expect(screen.getByRole('heading', { name: 'Cek email Anda' })).toBeDefined());
   expect(screen.getByText('rani@wam.co.id')).toBeDefined();
   const request = JSON.parse(fetchMock.mock.calls[1][1].body);
-  expect(request.businessType).toBe('retail');
-  expect(request.businessName).toBe('Toko Rani');
-  expect(request.modules).not.toContain('customers');
+  expect(request.registerAccount).toBe(true);
+  expect(request.businessName).toBeUndefined();
   fireEvent.change(screen.getByLabelText('Kode OTP'), { target: { value: '123456' } });
   fireEvent.click(screen.getByRole('button', { name: /verifikasi email/i }));
+  await waitFor(() => expect(screen.getByRole('heading', { name: 'Siapkan usaha Anda' })).toBeDefined());
+  fireEvent.change(screen.getByLabelText('Nama usaha'), { target: { value: 'Toko Rani' } });
+  fireEvent.change(screen.getByLabelText('Jenis usaha'), { target: { value: 'retail' } });
+  fireEvent.click(screen.getByLabelText('Data pelanggan'));
+  fireEvent.click(screen.getByRole('button', { name: /buat workspace usaha/i }));
   await waitFor(() => expect(screen.getByRole('heading', { name: 'Dashboard' })).toBeDefined());
   expect(screen.getByText('Rani WAM')).toBeDefined();
   expect(screen.getByRole('status', { name: 'Hitung mundur masa demo' })).toBeDefined();
   expect(screen.getByText('Demo gratis tersisa')).toBeDefined();
   expect(screen.getByRole('button', { name: 'Pembukuan' })).toBeDefined();
   expect(screen.getByRole('button', { name: 'Pengelolaan Akses' })).toBeDefined();
-  expect(fetchMock.mock.calls[2][0]).toBe('/api/auth/verify-otp');
+  const verifyCall = fetchMock.mock.calls.find(([url]) => url === '/api/auth/verify-otp');
+  const setupCall = fetchMock.mock.calls.find(([url]) => url === '/api/auth/setup-business');
+  expect(verifyCall).toBeDefined();
+  expect(setupCall).toBeDefined();
+  const setupPayload = JSON.parse(setupCall[1].body);
+  expect(setupPayload.businessName).toBe('Toko Rani');
+  expect(setupPayload.businessType).toBe('retail');
+  expect(setupPayload.modules).not.toContain('customers');
 });
 
 test('creates an employee registration link through the server', async () => {
@@ -272,7 +295,6 @@ test('does not show the OTP step when the email service rejects a request', asyn
   fireEvent.change(screen.getByLabelText('Nama lengkap'), { target: { value: 'Rani WAM' } });
   fireEvent.change(screen.getByLabelText('Nomor HP'), { target: { value: '081234567890' } });
   fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'rani@wam.co.id' } });
-  fireEvent.change(screen.getByLabelText('Nama usaha'), { target: { value: 'Toko Rani' } });
   fireEvent.click(screen.getByRole('button', { name: /kirim kode otp/i }));
 
   expect((await screen.findByRole('alert')).textContent).toContain('Email tidak dapat dikirim.');
@@ -334,32 +356,51 @@ test('creates a POS receipt and prepares its WhatsApp share message', async () =
 });
 
 test('routes a restaurant digital order through cashier, kitchen, waiter, payment, and WhatsApp receipt', async () => {
-  const fetchMock = vi.fn()
-    .mockResolvedValueOnce({ ok: false, status: 401, json: async () => ({}) })
-    .mockResolvedValueOnce({ ok: true, json: async () => ({}) })
-    .mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        user: { id: 'restaurant-owner', name: 'Rani Cafe', email: 'rani@cafe.test', role: 'OWNER' },
-        business: { name: 'Kafe Rani', type: 'restaurant' },
-      }),
-    })
-    .mockResolvedValue({ ok: true, json: async () => ({}) });
+  const fetchMock = vi.fn(async (url) => {
+    if (url === '/api/auth/session') return { ok: false, status: 401, json: async () => ({}) };
+    if (url === '/api/auth/verify-otp') {
+      return {
+        ok: true,
+        json: async () => ({
+          user: { id: 'restaurant-owner', name: 'Rani Cafe', email: 'rani@cafe.test', role: 'OWNER' },
+        }),
+      };
+    }
+    if (url === '/api/auth/setup-business') {
+      return {
+        ok: true,
+        json: async () => ({
+          user: { id: 'restaurant-owner', name: 'Rani Cafe', email: 'rani@cafe.test', role: 'OWNER' },
+          business: {
+            id: 'restaurant-company',
+            name: 'Kafe Rani',
+            type: 'restaurant',
+            modules: ['dashboard', 'products', 'prices', 'pos', 'transactions', 'digital_receipts', 'menu', 'orders', 'tables', 'suppliers', 'sales_reports', 'employees'],
+          },
+        }),
+      };
+    }
+    return { ok: true, json: async () => ({}) };
+  });
   vi.stubGlobal('fetch', fetchMock);
   render(<App />);
   fireEvent.click(screen.getByRole('link', { name: /daftar/i }));
   fireEvent.change(screen.getByLabelText('Nama lengkap'), { target: { value: 'Rani Cafe' } });
   fireEvent.change(screen.getByLabelText('Nomor HP'), { target: { value: '081234567890' } });
   fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'rani@cafe.test' } });
-  fireEvent.change(screen.getByLabelText('Nama usaha'), { target: { value: 'Kafe Rani' } });
-  fireEvent.change(screen.getByLabelText('Jenis usaha'), { target: { value: 'restaurant' } });
   fireEvent.click(screen.getByRole('button', { name: /kirim kode otp/i }));
   await waitFor(() => expect(screen.getByRole('heading', { name: 'Cek email Anda' })).toBeDefined());
   fireEvent.change(screen.getByLabelText('Kode OTP'), { target: { value: '123456' } });
   fireEvent.click(screen.getByRole('button', { name: /verifikasi email/i }));
+  await waitFor(() => expect(screen.getByRole('heading', { name: 'Siapkan usaha Anda' })).toBeDefined());
+  fireEvent.change(screen.getByLabelText('Nama usaha'), { target: { value: 'Kafe Rani' } });
+  fireEvent.change(screen.getByLabelText('Jenis usaha'), { target: { value: 'restaurant' } });
+  fireEvent.click(screen.getByRole('button', { name: /buat workspace usaha/i }));
   await waitFor(() => expect(screen.getByRole('heading', { name: 'Dashboard' })).toBeDefined());
+  await waitFor(() => expect(screen.queryByText('Memuat ringkasan operasional…')).toBeNull());
 
   fireEvent.click(screen.getByRole('button', { name: 'Menu Digital' }));
+  await waitFor(() => expect(screen.getByRole('heading', { name: 'Menu Digital' })).toBeDefined());
   fireEvent.click(screen.getByRole('button', { name: /Buat QR Code/ }));
   const generalQr = await screen.findByAltText('QR menu umum');
   expect(generalQr.getAttribute('src')).toContain('data:image/svg+xml');

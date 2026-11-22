@@ -312,24 +312,31 @@ app.post('/api/auth/request-otp', requestOtpLimit, async (req, res, next) => {
     return res.status(503).json({ message: 'Layanan OTP belum dikonfigurasi. Pengaturan SMTP server belum lengkap.' });
   }
   const isPlatformOwner = email === String(process.env.PLATFORM_OWNER_EMAIL || '').toLowerCase();
-  const hasRegistration = Boolean(req.body.businessName && req.body.businessType && !req.body.inviteToken);
-  if (hasRegistration && !businessTypeIds.has(req.body.businessType)) {
+  const hasRegistration = Boolean(
+    (req.body.registerAccount || (req.body.businessName && req.body.businessType))
+      && !req.body.inviteToken,
+  );
+  const hasBusinessSetup = Boolean(req.body.businessName && req.body.businessType);
+  if (hasBusinessSetup && !businessTypeIds.has(req.body.businessType)) {
     return res.status(400).json({ message: 'Jenis usaha tidak valid.' });
   }
   const requestedModules = Array.isArray(req.body.modules)
     ? req.body.modules
-    : (hasRegistration ? businessTypes[req.body.businessType].modules.map(([id]) => id) : []);
+    : (hasBusinessSetup ? businessTypes[req.body.businessType].modules.map(([id]) => id) : []);
   const allowedModules = new Set(
-    hasRegistration ? businessTypes[req.body.businessType].modules.map(([id]) => id) : [],
+    hasBusinessSetup ? businessTypes[req.body.businessType].modules.map(([id]) => id) : [],
   );
-  if (hasRegistration
+  if (hasBusinessSetup
     && (!requestedModules.includes('dashboard')
       || requestedModules.some((moduleId) => typeof moduleId !== 'string' || !allowedModules.has(moduleId))
       || new Set(requestedModules).size !== requestedModules.length)) {
     return res.status(400).json({ message: 'Struktur modul workspace tidak valid.' });
   }
-  if (hasRegistration && (!String(req.body.name || '').trim() || !String(req.body.businessName).trim())) {
-    return res.status(400).json({ message: 'Nama pengguna dan nama usaha wajib diisi.' });
+  if (hasRegistration && !String(req.body.name || '').trim()) {
+    return res.status(400).json({ message: 'Nama pengguna wajib diisi.' });
+  }
+  if (hasBusinessSetup && !String(req.body.businessName).trim()) {
+    return res.status(400).json({ message: 'Nama usaha wajib diisi.' });
   }
   if (req.body.inviteToken) {
     const invite = await pool.query(
@@ -345,6 +352,7 @@ app.post('/api/auth/request-otp', requestOtpLimit, async (req, res, next) => {
     businessName: String(req.body.businessName || '').trim(),
     businessType: String(req.body.businessType || ''),
     modules: requestedModules,
+    registration: hasRegistration,
     inviteToken: String(req.body.inviteToken || ''),
     isPlatformOwner,
   };
@@ -425,6 +433,14 @@ app.post('/api/auth/verify-otp', async (req, res, next) => {
       );
       user = result.rows[0];
       await client.query('UPDATE team_invites SET consumed_at = now() WHERE token_hash = $1', [invite.token_hash]);
+    } else if (!user && payload.registration && !payload.businessName) {
+      const result = await client.query(
+        `INSERT INTO users (name, email, phone, role, permissions)
+         VALUES ($1, $2, $3, 'OWNER', $4)
+         RETURNING id, company_id, name, email, role, permissions`,
+        [payload.name, email, payload.phone, JSON.stringify(permissionSets.OWNER)],
+      );
+      user = result.rows[0];
     } else if (!user && payload.businessName) {
       const trialEnd = trialEndsAt(new Date());
       const companyResult = await client.query(
@@ -470,6 +486,70 @@ app.post('/api/auth/verify-otp', async (req, res, next) => {
     return res.json({
       user: { ...user, permissions: user.permissions },
       ...(business ? { business: publicBusiness(business) } : {}),
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    return next(error);
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/api/auth/setup-business', authenticate, requireRole('OWNER'), async (req, res, next) => {
+  const businessName = String(req.body?.businessName || '').trim();
+  const businessType = String(req.body?.businessType || '');
+  const modules = req.body?.modules;
+  if (!businessName || businessName.length > 160 || !businessTypeIds.has(businessType)) {
+    return res.status(400).json({ message: 'Nama atau jenis usaha tidak valid.' });
+  }
+  const allowedModules = new Set(businessTypes[businessType].modules.map(([id]) => id));
+  if (!Array.isArray(modules)
+    || !modules.includes('dashboard')
+    || modules.some((moduleId) => typeof moduleId !== 'string' || !allowedModules.has(moduleId))
+    || new Set(modules).size !== modules.length) {
+    return res.status(400).json({ message: 'Struktur modul workspace tidak valid.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const userResult = await client.query(
+      'SELECT id, company_id, name, email, phone, role, permissions FROM users WHERE id = $1 FOR UPDATE',
+      [req.user.id],
+    );
+    const user = userResult.rows[0];
+    if (!user || user.role !== 'OWNER') {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ message: 'Hanya Owner yang dapat menyiapkan workspace.' });
+    }
+    if (user.company_id) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ message: 'Akun ini sudah memiliki workspace usaha.' });
+    }
+
+    const companyResult = await client.query(
+      `INSERT INTO companies (name, business_type, modules, trial_ends_at)
+       VALUES ($1, $2, $3, $4) RETURNING *`,
+      [businessName, businessType, JSON.stringify(modules), trialEndsAt(new Date())],
+    );
+    const business = companyResult.rows[0];
+    const branchResult = await client.query(
+      `INSERT INTO business_branches (company_id, name, code, is_primary)
+       VALUES ($1, 'Cabang Utama', 'PUSAT', true)
+       RETURNING id`,
+      [business.id],
+    );
+    await client.query('INSERT INTO attendance_settings (company_id) VALUES ($1)', [business.id]);
+    const updatedUserResult = await client.query(
+      `UPDATE users SET company_id = $1, branch_id = $2
+       WHERE id = $3
+       RETURNING id, company_id, branch_id, name, email, role, permissions`,
+      [business.id, branchResult.rows[0].id, user.id],
+    );
+    await client.query('COMMIT');
+    return res.status(201).json({
+      user: updatedUserResult.rows[0],
+      business: publicBusiness(business),
     });
   } catch (error) {
     await client.query('ROLLBACK');

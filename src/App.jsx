@@ -457,25 +457,9 @@ function AuthScreen({ mode, onModeChange, onBack, onAuthenticated }) {
   const [submitting, setSubmitting] = useState(false);
   const [email, setEmail] = useState('');
   const [otpPayload, setOtpPayload] = useState(null);
-  const [businessType, setBusinessType] = useState('dealer_motor');
-  const [selectedModules, setSelectedModules] = useState(
-    businessTypes.dealer_motor.modules.map(([id]) => id),
-  );
   const isRegister = mode === 'register';
   const inviteToken = new URLSearchParams(window.location.search).get('invite') ?? '';
   const isEmployeeInvite = isRegister && Boolean(inviteToken);
-
-  const updateBusinessType = (event) => {
-    const nextType = event.target.value;
-    setBusinessType(nextType);
-    setSelectedModules(businessTypes[nextType].modules.map(([id]) => id));
-  };
-
-  const toggleModule = (moduleId) => {
-    setSelectedModules((current) => current.includes(moduleId)
-      ? current.filter((id) => id !== moduleId)
-      : [...current, moduleId]);
-  };
 
   const sendOtp = async (event) => {
     event.preventDefault();
@@ -489,11 +473,7 @@ function AuthScreen({ mode, onModeChange, onBack, onAuthenticated }) {
       ...(isRegister ? {
         name: formData.get('name'),
         phone: formData.get('phone'),
-      } : {}),
-      ...(isRegister && !isEmployeeInvite ? {
-        businessName: formData.get('businessName'),
-        businessType: formData.get('businessType'),
-        modules: selectedModules,
+        ...(!isEmployeeInvite ? { registerAccount: true } : {}),
       } : {}),
       ...(isEmployeeInvite ? { inviteToken } : {}),
     };
@@ -586,7 +566,7 @@ function AuthScreen({ mode, onModeChange, onBack, onAuthenticated }) {
             <div className="auth-welcome-icon">{otpRequested ? '✉' : isRegister ? '✳' : '↗'}</div>
             <span className="auth-overline">{otpRequested ? 'VERIFIKASI EMAIL' : isRegister ? 'MULAI KELOLA USAHA' : 'SELAMAT DATANG KEMBALI'}</span>
             <h2>{otpRequested ? 'Cek email Anda' : isRegister ? (isEmployeeInvite ? 'Daftar sebagai karyawan' : 'Buat workspace usaha') : 'Masuk ke akun'}</h2>
-            <p className="auth-description">{otpRequested ? <>Masukkan kode OTP 6 digit yang dikirim ke <strong>{email}</strong>.</> : isEmployeeInvite ? 'Lengkapi data diri untuk bergabung ke workspace usaha.' : isRegister ? 'Pendaftar pertama menjadi Owner usaha. Owner dapat mengundang Super Admin dan tim operasional.' : 'Masuk dengan email. Kami akan mengirim kode OTP untuk verifikasi.'}</p>
+            <p className="auth-description">{otpRequested ? <>Masukkan kode OTP 6 digit yang dikirim ke <strong>{email}</strong>.</> : isEmployeeInvite ? 'Lengkapi data diri untuk bergabung ke workspace usaha.' : isRegister ? 'Verifikasi email terlebih dahulu. Setelah itu, Anda dapat mengisi data usaha dan menyiapkan workspace.' : 'Masuk dengan email. Kami akan mengirim kode OTP untuk verifikasi.'}</p>
 
             {!otpRequested && <div className="auth-tabs" aria-label="Masuk atau daftar">
               <a aria-current={!isRegister ? 'page' : undefined} className={!isRegister ? 'selected' : ''} href="#masuk" onClick={(event) => {
@@ -618,14 +598,6 @@ function AuthScreen({ mode, onModeChange, onBack, onAuthenticated }) {
                   <label className="auth-field"><span>Nomor HP</span><input autoComplete="tel" name="phone" placeholder="08xxxxxxxxxx" required type="tel" /></label>
                 </>}
                 <label className="auth-field"><span>Email</span><input autoComplete="email" name="email" placeholder="nama@email.com" required type="email" /></label>
-                {isRegister && !isEmployeeInvite && <>
-                  <label className="auth-field"><span>Nama usaha</span><input autoComplete="organization" name="businessName" placeholder="Contoh: Dealer Motor Sejahtera" required /></label>
-                  <label className="auth-field"><span>Jenis usaha</span><select className="auth-select" name="businessType" onChange={updateBusinessType} value={businessType}>{Object.entries(businessTypes).map(([id, business]) => <option key={id} value={id}>{business.label}</option>)}</select></label>
-                  <fieldset className="structure-picker">
-                    <legend>Struktur workspace <small>Pilih modul yang dibutuhkan</small></legend>
-                    <div className="structure-list">{businessTypes[businessType].modules.map(([id, label]) => <label className="structure-option" key={id}><input checked={selectedModules.includes(id)} onChange={() => toggleModule(id)} type="checkbox" /><span>{label}</span></label>)}</div>
-                  </fieldset>
-                </>}
                 {message && <div className={`auth-message ${messageIsError ? 'error' : ''}`} role={messageIsError ? 'alert' : 'status'}>{message}</div>}
                 <button className="auth-submit" disabled={submitting} type="submit">{submitting ? 'Mengirim…' : 'Kirim kode OTP'} <span>→</span></button>
               </form>
@@ -640,10 +612,101 @@ function AuthScreen({ mode, onModeChange, onBack, onAuthenticated }) {
   );
 }
 
+function BusinessSetupScreen({ onComplete }) {
+  const [businessType, setBusinessType] = useState('dealer_motor');
+  const [selectedModules, setSelectedModules] = useState(
+    businessTypes.dealer_motor.modules.map(([id]) => id),
+  );
+  const [submitting, setSubmitting] = useState(false);
+  const [message, setMessage] = useState('');
+
+  const updateBusinessType = (event) => {
+    const nextType = event.target.value;
+    setBusinessType(nextType);
+    setSelectedModules(businessTypes[nextType].modules.map(([id]) => id));
+  };
+
+  const toggleModule = (moduleId) => {
+    setSelectedModules((current) => current.includes(moduleId)
+      ? current.filter((id) => id !== moduleId)
+      : [...current, moduleId]);
+  };
+
+  const submitSetup = async (event) => {
+    event.preventDefault();
+    setMessage('');
+    setSubmitting(true);
+    const formData = new FormData(event.currentTarget);
+    try {
+      const response = await fetch('/api/auth/setup-business', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          businessName: formData.get('businessName'),
+          businessType,
+          modules: selectedModules,
+        }),
+      });
+      if (!response.ok) {
+        setMessage(await getApiError(response, 'Data usaha belum dapat disimpan.'));
+        return;
+      }
+      const result = await response.json();
+      if (!result.user?.id || !result.business?.id) {
+        setMessage('Respons setup usaha dari server tidak lengkap. Silakan hubungi administrator.');
+        return;
+      }
+      onComplete(result, { businessType, modules: selectedModules });
+    } catch {
+      setMessage('Setup usaha tidak dapat dihubungkan ke server. Silakan coba lagi.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <main className="auth-page">
+      <div className="auth-orb auth-orb-one" />
+      <div className="auth-orb auth-orb-two" />
+      <section className="auth-layout">
+        <div className="auth-showcase">
+          <div className="auth-brand"><img className="auth-brand-mark" src="/kelolausaha-mark.svg" alt="" /><span>KELOLAUSAHA.STORE</span></div>
+          <div className="auth-showcase-content">
+            <span className="auth-kicker"><span /> EMAIL TERVERIFIKASI</span>
+            <h1>Siapkan usaha,<br /><em>mulai bertumbuh.</em></h1>
+            <p>Tentukan jenis usaha dan modul awal. Anda dapat menyesuaikan workspace kembali nanti.</p>
+          </div>
+          <div className="auth-showcase-footer"><span>Satu ruang kerja untuk usaha Anda</span><span>KELOLAUSAHA.STORE</span></div>
+        </div>
+        <div className="auth-form-side">
+          <div className="auth-form-wrap">
+            <div className="auth-welcome-icon">✳</div>
+            <span className="auth-overline">LANGKAH TERAKHIR</span>
+            <h2>Siapkan usaha Anda</h2>
+            <p className="auth-description">Email berhasil diverifikasi. Lengkapi data usaha untuk membuat workspace demo satu bulan.</p>
+            <form className="auth-form" onSubmit={submitSetup}>
+              <label className="auth-field"><span>Nama usaha</span><input autoComplete="organization" name="businessName" placeholder="Contoh: Dealer Motor Sejahtera" required /></label>
+              <label className="auth-field"><span>Jenis usaha</span><select className="auth-select" name="businessType" onChange={updateBusinessType} value={businessType}>{Object.entries(businessTypes).map(([id, business]) => <option key={id} value={id}>{business.label}</option>)}</select></label>
+              <fieldset className="structure-picker">
+                <legend>Struktur workspace <small>Pilih modul yang dibutuhkan</small></legend>
+                <div className="structure-list">{businessTypes[businessType].modules.map(([id, label]) => <label className="structure-option" key={id}><input checked={selectedModules.includes(id)} onChange={() => toggleModule(id)} type="checkbox" /><span>{label}</span></label>)}</div>
+              </fieldset>
+              {message && <div className="auth-message error" role="alert">{message}</div>}
+              <button className="auth-submit" disabled={submitting} type="submit">{submitting ? 'Membuat workspace…' : 'Buat workspace usaha'} <span>→</span></button>
+            </form>
+            <div className="auth-secure-note"><span>✓</span> Demo satu bulan · Tanpa biaya di awal</div>
+          </div>
+        </div>
+      </section>
+    </main>
+  );
+}
+
 function App() {
   const [activeUserId, setActiveUserId] = useState('platform-owner-demo');
   const [activePage, setActivePage] = useState('Semua Usaha');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [needsBusinessSetup, setNeedsBusinessSetup] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
   const [billingData, setBillingData] = useState(null);
   const [platformData, setPlatformData] = useState(null);
@@ -1303,6 +1366,7 @@ function App() {
       setNotice(`Pesanan tersimpan tidak dapat dimuat: ${error.message}`);
     }
     setIsAuthenticated(true);
+    setNeedsBusinessSetup(user.role === 'OWNER' && !result.business);
     setDemoMode(false);
     setBillingData(user.role === 'OWNER' && result.business?.subscription ? { business: result.business } : null);
     const nextBusinessType = result.business?.type
@@ -1436,7 +1500,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!isAuthenticated) return undefined;
+    if (!isAuthenticated || needsBusinessSetup) return undefined;
     let cancelled = false;
     const loadAccountData = async () => {
       try {
@@ -1477,7 +1541,7 @@ function App() {
       window.clearInterval(refreshTimer);
       if (stopPaymentChecks) window.clearTimeout(stopPaymentChecks);
     };
-  }, [activeUser.id, activeUser.role, isAuthenticated]);
+  }, [activeUser.id, activeUser.role, isAuthenticated, needsBusinessSetup]);
 
   useEffect(() => {
     if (!isAuthenticated || activeUser.role !== 'PLATFORM_OWNER') return undefined;
@@ -1681,6 +1745,10 @@ function App() {
         });
       }}
     />;
+  }
+
+  if (needsBusinessSetup) {
+    return <BusinessSetupScreen onComplete={finishAuthentication} />;
   }
 
   if (authView) {
