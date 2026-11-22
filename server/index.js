@@ -15,7 +15,7 @@ import { createDealerMotorRouter } from './dealer-motor.js';
 import { midtransFailureMessage, resolveMidtransEnvironment, verifyNotificationSignature } from './midtrans.js';
 import { createOperationsRouter, createPublicOperationsRouter } from './operations.js';
 import { addCalendarMonths, getBranchAddon, getPlan, plans, branchAddons, subscriptionStatus, trialEndsAt } from './plans.js';
-import { slugifyBusinessName, tenantSlugFromHost, workspaceUrlFor } from './tenant-domain.js';
+import { resolveTenantSlug, slugifyBusinessName, workspaceUrlFor } from './tenant-domain.js';
 import { createWorkspaceOperationsRouter } from './workspace-operations.js';
 
 const { Pool } = pg;
@@ -78,8 +78,23 @@ function appRootDomain(req) {
   return new URL(appRootOrigin(req)).hostname;
 }
 
-function requestTenantSlug(req) {
-  return tenantSlugFromHost(req.hostname || req.get('host'), appRootDomain(req));
+async function requestTenantSlug(req) {
+  return resolveTenantSlug(
+    req.hostname || req.get('host'),
+    appRootDomain(req),
+    async (hostSlug) => {
+      const result = await pool.query(
+        `SELECT c.slug
+         FROM companies c
+         LEFT JOIN company_slug_aliases a ON a.company_id = c.id
+         WHERE c.slug = $1 OR a.alias_slug = $1
+         ORDER BY (c.slug = $1) DESC
+         LIMIT 1`,
+        [hostSlug],
+      );
+      return result.rows[0]?.slug;
+    },
+  );
 }
 
 function sessionCookieDomain() {
@@ -97,7 +112,13 @@ async function uniqueBusinessSlug(client, businessName) {
   let slug = baseSlug;
   let suffix = 2;
   while (true) {
-    const result = await client.query('SELECT 1 FROM companies WHERE slug = $1', [slug]);
+    const result = await client.query(
+      `SELECT 1 FROM companies WHERE slug = $1
+       UNION ALL
+       SELECT 1 FROM company_slug_aliases WHERE alias_slug = $1
+       LIMIT 1`,
+      [slug],
+    );
     if (!result.rowCount) return slug;
     slug = `${baseSlug}-${suffix}`;
     suffix += 1;
@@ -176,7 +197,7 @@ async function authenticate(req, res, next) {
     );
     if (!result.rowCount) return res.status(401).json({ message: 'Sesi telah berakhir. Silakan masuk kembali.' });
     req.user = result.rows[0];
-    const tenantSlug = requestTenantSlug(req);
+    const tenantSlug = await requestTenantSlug(req);
     if (tenantSlug && req.user.company_slug !== tenantSlug) {
       return res.status(403).json({ message: 'Akun ini tidak terdaftar pada workspace usaha tersebut.' });
     }
@@ -363,7 +384,7 @@ app.get('/api/system/status', (req, res) => {
   });
 });
 app.get('/api/public/workspace', async (req, res, next) => {
-  const slug = requestTenantSlug(req);
+  const slug = await requestTenantSlug(req);
   if (!slug) return res.status(404).json({ message: 'Workspace usaha tidak ditemukan.' });
   try {
     const result = await pool.query(
@@ -434,7 +455,7 @@ app.post('/api/auth/request-otp', requestOtpLimit, async (req, res, next) => {
   if (hasBusinessSetup && !String(req.body.businessName).trim()) {
     return res.status(400).json({ message: 'Nama usaha wajib diisi.' });
   }
-  const tenantSlug = requestTenantSlug(req);
+  const tenantSlug = await requestTenantSlug(req);
   let invitedCompany = null;
   const existingUserResult = await pool.query(
     `SELECT u.company_id, u.active, u.approval_status, c.slug AS company_slug
@@ -515,7 +536,7 @@ app.post('/api/auth/verify-otp', async (req, res, next) => {
       return res.status(400).json({ message: 'Kode OTP salah atau sudah kedaluwarsa.' });
     }
     const payload = challenge.payload;
-    const tenantSlug = requestTenantSlug(req);
+    const tenantSlug = await requestTenantSlug(req);
     if (String(payload.tenantSlug || '') !== String(tenantSlug || '')) {
       await client.query('ROLLBACK');
       return res.status(403).json({ message: 'Proses OTP harus diselesaikan pada workspace tempat pendaftaran dimulai.' });

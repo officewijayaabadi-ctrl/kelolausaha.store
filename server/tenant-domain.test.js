@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'vitest';
-import { slugifyBusinessName, tenantSlugFromHost, workspaceUrlFor } from './tenant-domain.js';
+import {
+  resolveTenantSlug,
+  slugifyBusinessName,
+  tenantSlugFromHost,
+  workspaceUrlFor,
+} from './tenant-domain.js';
 
 describe('tenant subdomains', () => {
   test('normalizes business names into readable subdomain slugs', () => {
@@ -14,6 +19,22 @@ describe('tenant subdomains', () => {
     expect(tenantSlugFromHost('kelolausaha.store', 'kelolausaha.store')).toBeNull();
     expect(tenantSlugFromHost('nested.dealer.kelolausaha.store', 'kelolausaha.store')).toBeNull();
     expect(tenantSlugFromHost('dealer.other-domain.test', 'kelolausaha.store')).toBeNull();
+  });
+
+  test('resolves legacy tenant aliases to the current short slug', async () => {
+    const oldSlug = 'usaha-dealer-6497b6127c474e9db11cdcccd1b4f100';
+    const resolveCanonicalSlug = async (slug) => (slug === oldSlug ? 'usaha-dealer' : null);
+
+    await expect(resolveTenantSlug(
+      `${oldSlug}.kelolausaha.store`,
+      'kelolausaha.store',
+      resolveCanonicalSlug,
+    )).resolves.toBe('usaha-dealer');
+    await expect(resolveTenantSlug(
+      'other-business.kelolausaha.store',
+      'kelolausaha.store',
+      resolveCanonicalSlug,
+    )).resolves.toBe('other-business');
   });
 
   test('builds workspace URLs from the configured app origin', () => {

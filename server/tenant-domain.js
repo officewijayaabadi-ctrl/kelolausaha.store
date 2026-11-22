@@ -21,6 +21,13 @@ export function tenantSlugFromHost(hostname, rootDomain) {
   return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) ? slug : null;
 }
 
+export async function resolveTenantSlug(hostname, rootDomain, resolveCanonicalSlug) {
+  const hostSlug = tenantSlugFromHost(hostname, rootDomain);
+  if (!hostSlug) return null;
+  const canonicalSlug = await resolveCanonicalSlug(hostSlug);
+  return canonicalSlug || hostSlug;
+}
+
 export function workspaceUrlFor(slug, origin) {
   const normalizedSlug = String(slug || '');
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(normalizedSlug)) {
