@@ -37,13 +37,13 @@ jobs:
             set -eu
             echo "=== NGINX TLS VHOSTS ==="
             if command -v nginx >/dev/null 2>&1; then
-              sudo nginx -T 2>/dev/null | grep -E 'server_name|listen .*443|ssl_certificate |proxy_pass ' | sort -u | head -100 || true
+              sudo nginx -T 2>/dev/null | grep -B 5 -A 25 -F 'server_name kelolausaha.store' || true
             else
               echo "nginx is not installed"
             fi
             echo "=== CERTBOT CERTIFICATES ==="
             if command -v certbot >/dev/null 2>&1; then
-              sudo certbot certificates 2>&1 | grep -E 'Certificate Name:|Domains:|Expiry Date:|Certificate Path:|Private Key Path:' || true
+              sudo certbot certificates 2>&1 | grep -A 5 -F 'Certificate Name: kelolausaha.store' || true
             else
               echo "certbot is not installed"
             fi
