@@ -112,8 +112,10 @@ jobs:
             try {
               await transport.verify();
               console.log('SMTP connection verified.');
-            } catch {
-              console.error('SMTP login failed. Check host, port, TLS, username, and password settings.');
+            } catch (error) {
+              const code = error?.code || 'unknown';
+              const responseCode = Number.isInteger(error?.responseCode) ? `, SMTP ${error.responseCode}` : '';
+              console.error(`SMTP verification failed (${code}${responseCode}). Check host, port, TLS, username, and password settings.`);
               process.exitCode = 1;
             } finally {
               transport.close();
