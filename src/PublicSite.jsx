@@ -1,23 +1,81 @@
+import { useEffect, useState } from 'react';
 import './PublicSite.css';
 import { plans } from '../shared/plans.js';
 
 const industries = [
-  ['Laundry', 'Harga per kg atau pcs, status cucian, dan jadwal pengambilan.'],
-  ['Dealer motor', 'Stok unit, data sales, SPK, leasing, dan laporan penjualan.'],
-  ['Toko & retail', 'Produk, harga, stok, transaksi kasir, dan riwayat pelanggan.'],
-  ['Restoran & kafe', 'Menu, pesanan, meja, pembayaran, dan struk digital.'],
-  ['Bengkel', 'Jasa servis, sparepart, mekanik, dan riwayat kendaraan.'],
-  ['Salon & jasa', 'Daftar layanan, booking, antrean, dan catatan pelanggan.'],
+  {
+    id: 'laundry',
+    name: 'Laundry',
+    icon: '◌',
+    description: 'Harga per kg atau pcs, status cucian, dan jadwal pengambilan.',
+    modules: ['Kasir kiloan', 'Status cucian', 'Jadwal ambil', 'Nota WhatsApp'],
+  },
+  {
+    id: 'dealer',
+    name: 'Dealer motor',
+    icon: '⌂',
+    description: 'Stok unit, data sales, SPK, leasing, dan laporan penjualan.',
+    modules: ['Stok unit', 'Data sales', 'SPK', 'Leasing', 'Laporan'],
+  },
+  {
+    id: 'retail',
+    name: 'Toko & retail',
+    icon: '▦',
+    description: 'Produk, harga, stok, transaksi kasir, dan riwayat pelanggan.',
+    modules: ['Katalog', 'Stok', 'Kasir POS', 'Pelanggan'],
+  },
+  {
+    id: 'restaurant',
+    name: 'Restoran & kafe',
+    icon: '◉',
+    description: 'Menu, pesanan, meja, pembayaran, dan struk digital.',
+    modules: ['Menu', 'Meja', 'Pesanan', 'Struk digital'],
+  },
+  {
+    id: 'workshop',
+    name: 'Bengkel',
+    icon: '⚙',
+    description: 'Jasa servis, sparepart, mekanik, dan riwayat kendaraan.',
+    modules: ['Perintah kerja', 'Sparepart', 'Mekanik', 'Riwayat kendaraan'],
+  },
+  {
+    id: 'salon',
+    name: 'Salon & jasa',
+    icon: '✦',
+    description: 'Daftar layanan, booking, antrean, dan catatan pelanggan.',
+    modules: ['Booking', 'Antrean', 'Layanan', 'Catatan klien'],
+  },
 ];
 
 const capabilities = [
-  ['POS & kasir', 'Catat penjualan, hitung total dan kembalian, serta simpan riwayat transaksi.'],
-  ['Produk, jasa & harga', 'Atur katalog dan satuan harga sesuai kebutuhan usaha.'],
-  ['Nota digital WhatsApp', 'Bagikan rincian pembayaran dengan pesan WhatsApp siap dikirim.'],
-  ['Tim & hak akses', 'Kelola anggota workspace dan atur akses per peran.'],
-  ['Operasional usaha', 'Susun modul produk, pelanggan, inventori, pembelian, dan cabang.'],
-  ['Keuangan & laporan', 'Siapkan pencatatan kas, pemasukan, pengeluaran, dan ringkasan usaha.'],
+  ['＋', 'POS & kasir', 'Catat penjualan, hitung total dan kembalian, serta simpan riwayat transaksi.'],
+  ['Rp', 'Produk, jasa & harga', 'Atur katalog dan satuan harga sesuai kebutuhan usaha.'],
+  ['▧', 'Nota digital WhatsApp', 'Bagikan rincian pembayaran dengan pesan WhatsApp siap dikirim.'],
+  ['♙', 'Tim & hak akses', 'Kelola anggota workspace dan atur akses per peran.'],
+  ['▦', 'Operasional usaha', 'Susun modul produk, pelanggan, inventori, pembelian, dan cabang.'],
+  ['↗', 'Keuangan & laporan', 'Siapkan pencatatan kas, pemasukan, pengeluaran, dan ringkasan usaha.'],
 ];
+
+const mockupModes = {
+  pos: {
+    label: 'Omzet Hari Ini',
+    value: 'Rp 14.850.000',
+    growth: '+18.4%',
+    chartLabel: 'Aktivitas Penjualan Mingguan',
+  },
+  workspace: {
+    label: 'Nilai Stok & Cabang',
+    value: 'Rp 48.200.000',
+    growth: '+24.1%',
+    chartLabel: 'Sinkronisasi Cabang & Inventori',
+  },
+  analytics: {
+    label: 'Laba Bersih Bulanan',
+    value: 'Rp 142.900.000',
+    growth: '+31.0%',
+    chartLabel: 'Margin Bersih Bulanan',
+  },
+};
 
 function rupiah(value) {
   return new Intl.NumberFormat('id-ID', {
@@ -28,6 +86,21 @@ function rupiah(value) {
 }
 
 function PublicSite({ onLogin, onRegister, onPreview, statusMessage }) {
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [selectedIndustry, setSelectedIndustry] = useState('dealer');
+  const [mockupMode, setMockupMode] = useState('pos');
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => setVisible(true));
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
+  const selected = industries.find((industry) => industry.id === selectedIndustry) || industries[1];
+  const mockup = mockupModes[mockupMode];
+
+  const closeMobileMenu = () => setMobileMenuOpen(false);
+
   return (
     <main className="public-site">
       <header className="public-header">
@@ -42,11 +115,29 @@ function PublicSite({ onLogin, onRegister, onPreview, statusMessage }) {
         <div className="public-header-actions">
           <a href="#masuk" onClick={(event) => { event.preventDefault(); onLogin(); }}>Masuk</a>
           <a className="public-button public-button-small" href="#daftar" onClick={(event) => { event.preventDefault(); onRegister(); }}>Daftar</a>
+          <button
+            type="button"
+            className="public-mobile-toggle"
+            aria-label={mobileMenuOpen ? 'Tutup menu' : 'Buka menu'}
+            aria-expanded={mobileMenuOpen}
+            onClick={() => setMobileMenuOpen((open) => !open)}
+          >
+            <span /><span /><span />
+          </button>
         </div>
+        {mobileMenuOpen && (
+          <nav className="public-mobile-menu" aria-label="Navigasi mobile">
+            <a href="#fitur" onClick={closeMobileMenu}>Fitur</a>
+            <a href="#jenis-usaha" onClick={closeMobileMenu}>Jenis usaha</a>
+            <a href="#paket" onClick={closeMobileMenu}>Paket</a>
+          </nav>
+        )}
       </header>
       {statusMessage && <div className="public-service-notice" role="status">{statusMessage}</div>}
 
-      <section className="public-hero" id="beranda">
+      <section className={`public-hero ${visible ? 'is-ready' : ''}`} id="beranda">
+        <div className="public-hero-orb public-hero-orb-one" />
+        <div className="public-hero-orb public-hero-orb-two" />
         <div className="public-hero-copy">
           <span className="public-eyebrow"><i /> PLATFORM OPERASIONAL UNTUK USAHA</span>
           <h1>Kelola usaha lebih <em>terarah.</em></h1>
@@ -55,7 +146,7 @@ function PublicSite({ onLogin, onRegister, onPreview, statusMessage }) {
             <button className="public-button" onClick={onRegister} type="button">Mulai demo gratis <span>→</span></button>
             <a className="public-secondary-link" href="#fitur">Jelajahi fitur <span>↓</span></a>
           </div>
-          <div className="public-trial-note"><span>✓</span> Demo 1 bulan · Tanpa biaya di awal</div>
+          <div className="public-trial-note"><span>✓</span> Demo 1 bulan · Tanpa biaya di awal · Siap pakai dalam 2 menit</div>
         </div>
         <div className="public-hero-visual" aria-label="Pratinjau dashboard KelolaUsaha.store">
           <div className="public-window">
@@ -63,20 +154,23 @@ function PublicSite({ onLogin, onRegister, onPreview, statusMessage }) {
             <div className="public-window-content">
               <div className="public-window-sidebar"><b>KU</b><i /><i /><i /><i /></div>
               <div className="public-window-main">
-                <small>RINGKASAN USAHA</small><strong>Selamat datang 👋</strong>
-                <div className="public-mini-stats"><span><i>TRANSAKSI</i><b>POS</b></span><span><i>WORKSPACE</i><b>Terpadu</b></span></div>
-                <div className="public-mini-chart"><i /><i /><i /><i /><i /><i /><i /><i /><i /><i /></div>
-                <div className="public-mini-receipt"><span>Nota digital</span><b>Siap dibagikan <em>✓</em></b></div>
+                <small>RINGKASAN USAHA</small>
+                <div className="public-mockup-heading"><strong>Selamat datang 👋</strong><div><i>{mockup.label}</i><b>{mockup.value}</b><em>{mockup.growth}</em></div></div>
+                <div className="public-mockup-tabs" role="tablist" aria-label="Mode pratinjau">
+                  <button type="button" role="tab" aria-selected={mockupMode === 'pos'} className={mockupMode === 'pos' ? 'active' : ''} onClick={() => setMockupMode('pos')}><i>TRANSAKSI</i><b>POS</b></button>
+                  <button type="button" role="tab" aria-selected={mockupMode === 'workspace'} className={mockupMode === 'workspace' ? 'active' : ''} onClick={() => setMockupMode('workspace')}><i>WORKSPACE</i><b>Terpadu</b></button>
+                  <button type="button" role="tab" aria-selected={mockupMode === 'analytics'} className={mockupMode === 'analytics' ? 'active' : ''} onClick={() => setMockupMode('analytics')}><i>ANALITIK</i><b>Laporan</b></button>
+                </div>
+                <div className="public-mini-chart"><span>{mockup.chartLabel}</span><div>{[45,62,88,54,74,96,68].map((height, index) => <i key={index} style={{ height: `${height}%` }} />)}</div></div>
               </div>
             </div>
           </div>
-          <div className="public-float-card"><span>✦</span><div><strong>Usaha dalam kendali</strong><small>Operasional lebih tertata</small></div></div>
+          <div className="public-float-card"><span>✓</span><div><strong>Nota digital terkirim</strong><small>WhatsApp · Usaha dalam kendali</small></div></div>
         </div>
-        <div className="public-hero-glow" />
       </section>
 
       <section className="public-trust-strip" id="keuntungan">
-        <span>DIRANCANG UNTUK MENDUKUNG</span>
+        <span>DIRANCANG UNTUK MENGELOLA</span>
         <strong>Operasional</strong><i /> <strong>Tim</strong><i /> <strong>Transaksi</strong><i /> <strong>Pertumbuhan usaha</strong>
       </section>
 
@@ -87,11 +181,13 @@ function PublicSite({ onLogin, onRegister, onPreview, statusMessage }) {
           <p>Mulai dari pencatatan penjualan hingga pengelolaan tim. Aktifkan modul yang relevan untuk alur kerja usaha Anda.</p>
         </div>
         <div className="public-feature-grid">
-          {capabilities.map(([title, description], index) => <article className="public-feature-card" key={title}>
-            <span className={`public-feature-icon icon-${index}`}>{['＋', 'Rp', '▧', '♙', '▦', '↗'][index]}</span>
-            <h3>{title}</h3><p>{description}</p>
-            <span className="public-feature-arrow">↗</span>
-          </article>)}
+          {capabilities.map(([icon, title, description], index) => (
+            <article className="public-feature-card" key={title}>
+              <span className="public-feature-icon">{icon}</span>
+              <h3>{title}</h3><p>{description}</p>
+              <span className="public-feature-arrow">↗</span>
+            </article>
+          ))}
         </div>
       </section>
 
@@ -103,9 +199,29 @@ function PublicSite({ onLogin, onRegister, onPreview, statusMessage }) {
             <p>Struktur workspace awal tersedia untuk dealer motor dan dapat dikembangkan sesuai kebutuhan usaha lainnya.</p>
           </div>
           <div className="public-industry-grid">
-            {industries.map(([title, description], index) => <article className={`public-industry-card ${index === 1 ? 'industry-highlight' : ''}`} key={title}>
-              <span>{['◌', '⌂', '▦', '◉', '⚙', '✦'][index]}</span><h3>{title}</h3><p>{description}</p>
-            </article>)}
+            {industries.map((industry) => (
+              <button
+                type="button"
+                className={`public-industry-card ${industry.id === selectedIndustry ? 'industry-highlight' : ''}`}
+                key={industry.id}
+                onClick={() => setSelectedIndustry(industry.id)}
+                aria-pressed={industry.id === selectedIndustry}
+              >
+                <span>{industry.icon}</span>
+                <h3>{industry.name}</h3>
+                <p>{industry.description}</p>
+                <small>{industry.id === selectedIndustry ? 'Aktif' : 'Pilih alur →'}</small>
+              </button>
+            ))}
+          </div>
+          <div className="public-module-preview">
+            <div>
+              <span>PREVIEW MODUL WORKSPACE</span>
+              <strong>Modul: {selected.name}</strong>
+            </div>
+            <div className="public-module-pills">
+              {selected.modules.map((module) => <span key={module}>✓ {module}</span>)}
+            </div>
           </div>
         </div>
       </section>
@@ -123,7 +239,9 @@ function PublicSite({ onLogin, onRegister, onPreview, statusMessage }) {
             ['02', 'Akses sesuai peran tim', 'Berikan tanggung jawab dan hak akses yang sesuai kebutuhan.'],
             ['03', 'Modul mengikuti kebutuhan', 'Mulai dari alur dealer motor, lalu aktifkan modul yang diperlukan.'],
             ['04', 'Siap melayani pelanggan', 'Catat transaksi dan bagikan nota digital melalui WhatsApp.'],
-          ].map(([number, title, text]) => <article key={number}><span>{number}</span><div><h3>{title}</h3><p>{text}</p></div><b>↗</b></article>)}
+          ].map(([number, title, text]) => (
+            <article key={number}><span>{number}</span><div><h3>{title}</h3><p>{text}</p></div><b>↗</b></article>
+          ))}
         </div>
       </section>
 
@@ -135,13 +253,15 @@ function PublicSite({ onLogin, onRegister, onPreview, statusMessage }) {
             <p>Setiap workspace baru mendapat demo selama satu bulan. Aktivasi dan pembayaran dilakukan oleh Owner Usaha.</p>
           </div>
           <div className="public-price-grid">
-            {plans.map((plan) => <article className={`public-price-card ${plan.featured ? 'price-featured' : ''}`} key={plan.id}>
-              {plan.id === 'year_1' && <span className="public-price-tag">PALING HEMAT</span>}
-              <h3>{plan.label}</h3><strong>{rupiah(plan.amount)}</strong><small>{plan.duration}</small>
-              <button onClick={onRegister} type="button">Mulai demo <span>→</span></button>
-            </article>)}
+            {plans.map((plan) => (
+              <article className={`public-price-card ${plan.featured ? 'price-featured' : ''}`} key={plan.id}>
+                {plan.id === 'year_1' && <span className="public-price-tag">PALING HEMAT</span>}
+                <h3>{plan.label}</h3><strong>{rupiah(plan.amount)}</strong><small>{plan.duration}</small>
+                <button onClick={onRegister} type="button">Mulai demo <span>→</span></button>
+              </article>
+            ))}
           </div>
-          <p className="public-payment-note">Owner Usaha dapat memilih paket dan melakukan pembayaran melalui Midtrans.</p>
+          <p className="public-payment-note">Owner Usaha dapat memilih paket dan melakukan pembayaran melalui <strong>Midtrans</strong>.</p>
         </div>
       </section>
 

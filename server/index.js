@@ -50,6 +50,14 @@ function otpHash(email, otp) {
   return createHmac('sha256', process.env.SESSION_SECRET).update(`${email}:${otp}`).digest('hex');
 }
 
+function configuredMidtransServerKey() {
+  return String(process.env.MIDTRANS_SERVER_KEY || '').trim();
+}
+
+function paymentOrigin(req) {
+  return String(process.env.APP_ORIGIN || `${req.protocol}://${req.get('host')}`).trim().replace(/\/+$/, '');
+}
+
 function constantTimeEqual(left, right) {
   const leftBuffer = Buffer.from(left);
   const rightBuffer = Buffer.from(right);
@@ -270,6 +278,12 @@ app.use((req, res, next) => {
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   next();
 });
+app.get('/api/system/status', (req, res) => {
+  res.json({
+    otp: Boolean(process.env.SESSION_SECRET && process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASSWORD),
+    midtrans: Boolean(configuredMidtransServerKey()),
+  });
+});
 app.use('/uploads', express.static(uploadDirectory, { dotfiles: 'deny', index: false }));
 app.use('/api/operations', createOperationsRouter({
   pool, authenticate, requireTenant, requireActiveTenant, requireRole,
@@ -284,6 +298,12 @@ app.post('/api/auth/request-otp', requestOtpLimit, async (req, res, next) => {
   const email = String(req.body.email || '').trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return res.status(400).json({ message: 'Alamat email tidak valid.' });
+  }
+  if (!process.env.SESSION_SECRET) {
+    return res.status(503).json({ message: 'Layanan OTP belum dikonfigurasi. SESSION_SECRET server belum disetel.' });
+  }
+  if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASSWORD) {
+    return res.status(503).json({ message: 'Layanan OTP belum dikonfigurasi. Pengaturan SMTP server belum lengkap.' });
   }
   const isPlatformOwner = email === String(process.env.PLATFORM_OWNER_EMAIL || '').toLowerCase();
   const hasRegistration = Boolean(req.body.businessName && req.body.businessType && !req.body.inviteToken);
@@ -507,7 +527,7 @@ app.post('/api/team/invites', authenticate, requireRole('OWNER', 'SUPER ADMIN'),
        VALUES ($1, $2, $3, $4, now() + interval '7 days')`,
       [hash(token), req.user.company_id, branchId, role],
     );
-    const origin = process.env.APP_ORIGIN || `${req.protocol}://${req.get('host')}`;
+    const origin = paymentOrigin(req);
     res.json({ inviteUrl: `${origin}/?invite=${token}` });
   } catch (error) {
     next(error);
@@ -685,7 +705,7 @@ app.post('/api/billing/branch-addon/checkout', authenticate, requireRole('OWNER'
   if (!addon || !Number.isInteger(quantity) || quantity < 1 || quantity > 100) {
     return res.status(400).json({ message: 'Jumlah cabang atau masa tambahan tidak valid.' });
   }
-  if (!process.env.MIDTRANS_SERVER_KEY) {
+  if (!configuredMidtransServerKey()) {
     return res.status(503).json({ message: 'Pembayaran belum tersedia. Midtrans Server Key belum dikonfigurasi di server.' });
   }
   const amount = addon.pricePerBranch * quantity;
@@ -702,7 +722,7 @@ app.post('/api/billing/branch-addon/checkout', authenticate, requireRole('OWNER'
     );
     const sandbox = process.env.MIDTRANS_ENV !== 'production';
     const baseUrl = sandbox ? 'https://app.sandbox.midtrans.com' : 'https://app.midtrans.com';
-    const authorization = Buffer.from(`${process.env.MIDTRANS_SERVER_KEY}:`).toString('base64');
+    const authorization = Buffer.from(`${configuredMidtransServerKey()}:`).toString('base64');
     const response = await fetch(`${baseUrl}/snap/v1/transactions`, {
       method: 'POST',
       headers: { Authorization: `Basic ${authorization}`, 'Content-Type': 'application/json' },
@@ -715,7 +735,7 @@ app.post('/api/billing/branch-addon/checkout', authenticate, requireRole('OWNER'
           name: `Tambahan ${quantity} cabang (${addon.label})`.slice(0, 50),
         }],
         customer_details: { first_name: company.name.slice(0, 50), email: req.user.email },
-        callbacks: { finish: `${process.env.APP_ORIGIN || `${req.protocol}://${req.get('host')}`}/?payment=check&branchAddon=1` },
+        callbacks: { finish: `${paymentOrigin(req)}/?payment=check&branchAddon=1` },
       }),
     });
     if (!response.ok) {
@@ -738,7 +758,7 @@ app.post('/api/billing/branch-addon/checkout', authenticate, requireRole('OWNER'
 app.post('/api/billing/checkout', authenticate, requireRole('OWNER'), requireTenant, async (req, res, next) => {
   const plan = getPlan(String(req.body.planId || ''));
   if (!plan) return res.status(400).json({ message: 'Paket aktivasi tidak valid.' });
-  if (!process.env.MIDTRANS_SERVER_KEY) {
+  if (!configuredMidtransServerKey()) {
     return res.status(503).json({ message: 'Pembayaran belum tersedia. Midtrans Server Key belum dikonfigurasi di server.' });
   }
   try {
@@ -753,7 +773,7 @@ app.post('/api/billing/checkout', authenticate, requireRole('OWNER'), requireTen
     );
     const sandbox = process.env.MIDTRANS_ENV !== 'production';
     const baseUrl = sandbox ? 'https://app.sandbox.midtrans.com' : 'https://app.midtrans.com';
-    const authorization = Buffer.from(`${process.env.MIDTRANS_SERVER_KEY}:`).toString('base64');
+    const authorization = Buffer.from(`${configuredMidtransServerKey()}:`).toString('base64');
     const response = await fetch(`${baseUrl}/snap/v1/transactions`, {
       method: 'POST',
       headers: { Authorization: `Basic ${authorization}`, 'Content-Type': 'application/json' },
@@ -761,7 +781,7 @@ app.post('/api/billing/checkout', authenticate, requireRole('OWNER'), requireTen
         transaction_details: { order_id: orderId, gross_amount: plan.amount },
         item_details: [{ id: plan.id, price: plan.amount, quantity: 1, name: `KelolaUsaha ${plan.label}` }],
         customer_details: { first_name: company.name.slice(0, 50), email: req.user.email },
-        callbacks: { finish: `${process.env.APP_ORIGIN || `${req.protocol}://${req.get('host')}`}/?payment=check` },
+        callbacks: { finish: `${paymentOrigin(req)}/?payment=check` },
       }),
     });
     if (!response.ok) {
@@ -783,11 +803,11 @@ app.post('/api/billing/checkout', authenticate, requireRole('OWNER'), requireTen
 
 app.post('/api/billing/midtrans-webhook', async (req, res, next) => {
   const { order_id: orderId, status_code: statusCode, gross_amount: grossAmount, signature_key: signature } = req.body;
-  if (!process.env.MIDTRANS_SERVER_KEY) return res.status(503).json({ message: 'Webhook belum dikonfigurasi.' });
+  if (!configuredMidtransServerKey()) return res.status(503).json({ message: 'Webhook belum dikonfigurasi.' });
   if (!orderId || !statusCode || !grossAmount || !signature) {
     return res.status(400).json({ message: 'Notifikasi Midtrans tidak lengkap.' });
   }
-  if (!verifyNotificationSignature(req.body, process.env.MIDTRANS_SERVER_KEY)) {
+  if (!verifyNotificationSignature(req.body, configuredMidtransServerKey())) {
     return res.status(403).json({ message: 'Signature Midtrans tidak valid.' });
   }
 

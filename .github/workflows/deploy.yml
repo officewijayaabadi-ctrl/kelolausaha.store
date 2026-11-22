@@ -19,6 +19,11 @@ jobs:
       - name: Deploy through SSH
         uses: appleboy/ssh-action@v1.2.0
         env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+          API_PORT: ${{ secrets.API_PORT }}
+          APP_ORIGIN: ${{ secrets.APP_ORIGIN }}
+          PLATFORM_OWNER_EMAIL: ${{ secrets.PLATFORM_OWNER_EMAIL }}
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
           SMTP_SECURE: ${{ secrets.SMTP_SECURE }}
@@ -37,14 +42,14 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
           port: ${{ secrets.VPS_PORT }}
-          envs: SMTP_HOST,SMTP_PORT,SMTP_SECURE,SMTP_USER,SMTP_PASSWORD,SMTP_FROM,IMAP_HOST,IMAP_PORT,IMAP_SECURE,IMAP_USER,IMAP_PASSWORD,MIDTRANS_ENV,MIDTRANS_SERVER_KEY
+          envs: DATABASE_URL,SESSION_SECRET,API_PORT,APP_ORIGIN,PLATFORM_OWNER_EMAIL,SMTP_HOST,SMTP_PORT,SMTP_SECURE,SMTP_USER,SMTP_PASSWORD,SMTP_FROM,IMAP_HOST,IMAP_PORT,IMAP_SECURE,IMAP_USER,IMAP_PASSWORD,MIDTRANS_ENV,MIDTRANS_SERVER_KEY
           script: |
             set -e
             cd /var/www/kelolausaha.store
 
             echo "Updating application code..."
-            git fetch origin main
-            git reset --hard origin/main
+            git fetch origin wijaya-abadi
+            git reset --hard origin/wijaya-abadi
 
             echo "Updating application secrets..."
             python3 - <<'PY'
@@ -53,6 +58,8 @@ jobs:
             import json
 
             keys = [
+                "DATABASE_URL", "SESSION_SECRET", "API_PORT",
+                "APP_ORIGIN", "PLATFORM_OWNER_EMAIL",
                 "SMTP_HOST", "SMTP_PORT", "SMTP_SECURE",
                 "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM",
                 "IMAP_HOST", "IMAP_PORT", "IMAP_SECURE",
