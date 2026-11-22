@@ -1,0 +1,96 @@
+
+name: Deploy KelolaUsaha to VPS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy production
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy through SSH
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_SECURE: ${{ secrets.SMTP_SECURE }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          IMAP_HOST: ${{ secrets.IMAP_HOST }}
+          IMAP_PORT: ${{ secrets.IMAP_PORT }}
+          IMAP_SECURE: ${{ secrets.IMAP_SECURE }}
+          IMAP_USER: ${{ secrets.IMAP_USER }}
+          IMAP_PASSWORD: ${{ secrets.IMAP_PASSWORD }}
+          MIDTRANS_ENV: ${{ secrets.MIDTRANS_ENV }}
+          MIDTRANS_SERVER_KEY: ${{ secrets.MIDTRANS_SERVER_KEY }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          envs: SMTP_HOST,SMTP_PORT,SMTP_SECURE,SMTP_USER,SMTP_PASSWORD,SMTP_FROM,IMAP_HOST,IMAP_PORT,IMAP_SECURE,IMAP_USER,IMAP_PASSWORD,MIDTRANS_ENV,MIDTRANS_SERVER_KEY
+          script: |
+            set -e
+            cd /var/www/kelolausaha.store
+
+            echo "Updating application code..."
+            git fetch origin main
+            git reset --hard origin/main
+
+            echo "Updating application secrets..."
+            python3 - <<'PY'
+            from pathlib import Path
+            import os
+            import json
+
+            keys = [
+                "SMTP_HOST", "SMTP_PORT", "SMTP_SECURE",
+                "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM",
+                "IMAP_HOST", "IMAP_PORT", "IMAP_SECURE",
+                "IMAP_USER", "IMAP_PASSWORD",
+                "MIDTRANS_ENV", "MIDTRANS_SERVER_KEY",
+            ]
+
+            path = Path(".env")
+            lines = path.read_text().splitlines() if path.exists() else []
+
+            for key in keys:
+                value = os.environ.get(key, "")
+                if value == "":
+                    continue
+
+                new_line = f"{key}={json.dumps(value)}"
+                prefix = key + "="
+                for index, line in enumerate(lines):
+                    if line.startswith(prefix):
+                        lines[index] = new_line
+                        break
+                else:
+                    lines.append(new_line)
+
+            path.write_text("\n".join(lines) + "\n")
+            path.chmod(0o600)
+            PY
+
+            echo "Installing dependencies..."
+            npm ci
+
+            echo "Running database migrations..."
+            npm run db:migrate
+
+            echo "Building frontend..."
+            npm run build
+
+            echo "Restarting backend..."
+            systemctl restart kelolausaha
+
+            echo "Deployment completed."
