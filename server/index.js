@@ -58,6 +58,10 @@ function paymentOrigin(req) {
   return String(process.env.APP_ORIGIN || `${req.protocol}://${req.get('host')}`).trim().replace(/\/+$/, '');
 }
 
+function configuredSmtpUser() {
+  return String(process.env.SMTP_USER || process.env.SMTP_FROM || '').trim();
+}
+
 function constantTimeEqual(left, right) {
   const leftBuffer = Buffer.from(left);
   const rightBuffer = Buffer.from(right);
@@ -165,17 +169,18 @@ function requestOtpLimit(req, res, next) {
 }
 
 async function sendOtpEmail(email, otp) {
-  if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASSWORD) {
+  const smtpUser = configuredSmtpUser();
+  if (!process.env.SMTP_HOST || !smtpUser || !process.env.SMTP_PASSWORD) {
     throw new Error('SMTP belum dikonfigurasi untuk pengiriman OTP.');
   }
   const transport = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
     port: Number(process.env.SMTP_PORT) || 587,
     secure: process.env.SMTP_SECURE === 'true',
-    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD },
+    auth: { user: smtpUser, pass: process.env.SMTP_PASSWORD },
   });
   await transport.sendMail({
-    from: process.env.SMTP_FROM || process.env.SMTP_USER,
+    from: process.env.SMTP_FROM || smtpUser,
     to: email,
     subject: 'Kode masuk KelolaUsaha.store',
     text: `Kode OTP Anda: ${otp}. Kode berlaku 10 menit dan jangan dibagikan.`,
@@ -183,17 +188,18 @@ async function sendOtpEmail(email, otp) {
 }
 
 async function sendSupportEmail({ to, subject, text, ticketNumber }) {
-  if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASSWORD) {
+  const smtpUser = configuredSmtpUser();
+  if (!process.env.SMTP_HOST || !smtpUser || !process.env.SMTP_PASSWORD) {
     throw new Error('SMTP belum dikonfigurasi untuk notifikasi bantuan.');
   }
   const transport = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
     port: Number(process.env.SMTP_PORT) || 587,
     secure: process.env.SMTP_SECURE === 'true',
-    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD },
+    auth: { user: smtpUser, pass: process.env.SMTP_PASSWORD },
   });
   return transport.sendMail({
-    from: process.env.SMTP_FROM || process.env.SMTP_USER,
+    from: process.env.SMTP_FROM || smtpUser,
     to,
     subject: `[${ticketNumber}] ${subject}`,
     text,
@@ -201,7 +207,7 @@ async function sendSupportEmail({ to, subject, text, ticketNumber }) {
 }
 
 async function ingestGmailReplies() {
-  const user = process.env.IMAP_USER || process.env.SMTP_USER;
+  const user = process.env.IMAP_USER || configuredSmtpUser();
   const password = process.env.IMAP_PASSWORD || process.env.SMTP_PASSWORD;
   if (!user || !password) return;
 
@@ -238,7 +244,7 @@ async function ingestGmailReplies() {
 
         const senderEmail = parsed.from?.value?.[0]?.address?.toLowerCase()
           || String(process.env.PLATFORM_OWNER_EMAIL || '').toLowerCase();
-        const ownerEmail = String(process.env.PLATFORM_OWNER_EMAIL || process.env.SMTP_USER || '').toLowerCase();
+        const ownerEmail = String(process.env.PLATFORM_OWNER_EMAIL || configuredSmtpUser()).toLowerCase();
         const senderType = senderEmail === ownerEmail ? 'owner' : 'user';
         const body = String(parsed.text || parsed.html || '').trim().slice(0, 5000);
         if (body) {
@@ -280,7 +286,7 @@ app.use((req, res, next) => {
 });
 app.get('/api/system/status', (req, res) => {
   res.json({
-    otp: Boolean(process.env.SESSION_SECRET && process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASSWORD),
+    otp: Boolean(process.env.SESSION_SECRET && process.env.SMTP_HOST && configuredSmtpUser() && process.env.SMTP_PASSWORD),
     midtrans: Boolean(configuredMidtransServerKey()),
   });
 });
@@ -302,7 +308,7 @@ app.post('/api/auth/request-otp', requestOtpLimit, async (req, res, next) => {
   if (!process.env.SESSION_SECRET) {
     return res.status(503).json({ message: 'Layanan OTP belum dikonfigurasi. SESSION_SECRET server belum disetel.' });
   }
-  if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASSWORD) {
+  if (!process.env.SMTP_HOST || !configuredSmtpUser() || !process.env.SMTP_PASSWORD) {
     return res.status(503).json({ message: 'Layanan OTP belum dikonfigurasi. Pengaturan SMTP server belum lengkap.' });
   }
   const isPlatformOwner = email === String(process.env.PLATFORM_OWNER_EMAIL || '').toLowerCase();
@@ -939,7 +945,7 @@ app.post('/api/support/tickets', async (req, res, next) => {
       [ticket.id, requesterName, requesterEmail, message],
     );
     await sendSupportEmail({
-      to: process.env.PLATFORM_OWNER_EMAIL || process.env.SMTP_USER,
+      to: process.env.PLATFORM_OWNER_EMAIL || configuredSmtpUser(),
       subject,
       ticketNumber,
       text: `Pesan baru dari ${requesterName} (${requesterEmail})\n\n${message}\n\nNomor tiket: ${ticketNumber}`,
@@ -1007,7 +1013,7 @@ app.post('/api/support/tickets/:ticketId/messages', async (req, res, next) => {
       [ticket.id],
     );
     await sendSupportEmail({
-      to: process.env.PLATFORM_OWNER_EMAIL || process.env.SMTP_USER,
+      to: process.env.PLATFORM_OWNER_EMAIL || configuredSmtpUser(),
       subject: ticket.subject,
       ticketNumber: ticket.ticket_number,
       text: `Pesan lanjutan dari ${ticket.requester_name} (${email})\n\n${body}\n\nNomor tiket: ${ticket.ticket_number}`,
@@ -1062,7 +1068,7 @@ app.post('/api/platform/support/tickets/:ticketId/reply', authenticate, requireR
     await pool.query(
       `INSERT INTO support_messages (ticket_id, sender_type, sender_name, sender_email, body, email_direction)
        VALUES ($1, 'owner', 'Owner KelolaUsaha.store', $2, $3, 'outbound')`,
-      [ticket.id, process.env.SMTP_USER, body],
+      [ticket.id, configuredSmtpUser(), body],
     );
     await pool.query(
       `UPDATE support_tickets SET status = $1, updated_at = now() WHERE id = $2`,
