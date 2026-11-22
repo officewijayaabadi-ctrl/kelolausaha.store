@@ -373,7 +373,7 @@ export function createOperationsRouter({ pool, authenticate, requireTenant, requ
           [companyId, branchId],
         ),
         pool.query(
-          `SELECT dates.day::date AS date, COALESCE(SUM(o.total), 0) AS total,
+          `SELECT to_char(dates.day::date, 'YYYY-MM-DD') AS date, COALESCE(SUM(o.total), 0) AS total,
              COUNT(o.id)::int AS "orderCount"
            FROM generate_series(current_date - 6, current_date, interval '1 day') AS dates(day)
            LEFT JOIN business_orders o ON o.company_id = $1

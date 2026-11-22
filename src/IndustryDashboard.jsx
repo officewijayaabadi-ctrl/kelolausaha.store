@@ -15,6 +15,18 @@ function formatDate(value, options = { dateStyle: 'medium' }) {
   return new Intl.DateTimeFormat('id-ID', options).format(new Date(value));
 }
 
+function parseChartDate(value) {
+  const dateOnly = typeof value === 'string' && /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  const date = dateOnly
+    ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]), 12)
+    : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  if (dateOnly && (date.getFullYear() !== Number(dateOnly[1])
+    || date.getMonth() !== Number(dateOnly[2]) - 1
+    || date.getDate() !== Number(dateOnly[3]))) return null;
+  return date;
+}
+
 export default function IndustryDashboard({
   businessType,
   workspaceName,
@@ -119,12 +131,16 @@ export default function IndustryDashboard({
           <section className="table-card dashboard-chart">
             <div className="table-heading"><div><h2>{isOwner ? 'Penjualan 7 hari terakhir' : 'Pesanan 7 hari terakhir'}</h2><p>Ringkasan harian workspace</p></div></div>
             <div className="weekly-sales-chart">
-              {(data.weeklySales || []).map((day) => {
+              {(data.weeklySales || []).map((day, index) => {
                 const amount = Number(day.total) || 0;
-                return <div className="weekly-sales-day" key={day.date} title={`${formatDate(day.date)}: ${isOwner ? formatCurrency(amount) : `${amount} pesanan`}`}>
+                const date = parseChartDate(day.date);
+                const dayLabel = date
+                  ? new Intl.DateTimeFormat('id-ID', { weekday: 'short' }).format(date)
+                  : '—';
+                return <div className="weekly-sales-day" key={day.date || index} title={`${date ? formatDate(date) : 'Tanggal tidak tersedia'}: ${isOwner ? formatCurrency(amount) : `${amount} pesanan`}`}>
                   <strong>{isOwner ? formatCurrency(amount) : ''}</strong>
                   <span className="weekly-sales-track"><i style={{ height: `${weeklyMaximum ? Math.max(4, (amount / weeklyMaximum) * 100) : 4}%` }} /></span>
-                  <small>{new Intl.DateTimeFormat('id-ID', { weekday: 'short' }).format(new Date(`${day.date}T12:00:00`))}</small>
+                  <small>{dayLabel}</small>
                 </div>;
               })}
             </div>
