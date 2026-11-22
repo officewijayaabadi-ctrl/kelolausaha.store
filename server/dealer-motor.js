@@ -133,6 +133,7 @@ export function createDealerMotorRouter({
         const summary = await pool.query(
           `SELECT COUNT(*) FILTER (WHERE stock_origin = 'opening')::int AS "openingStock",
                   COUNT(*) FILTER (WHERE stock_origin = 'incoming')::int AS "incomingStock",
+                  COUNT(*) FILTER (WHERE stock_status = 'reserved')::int AS "reservedStock",
                   COUNT(*) FILTER (WHERE stock_status = 'available')::int AS "availableStock",
                   COUNT(*) FILTER (WHERE stock_status = 'approved_for_delivery')::int AS "readyForDelivery",
                   COUNT(*) FILTER (WHERE stock_status = 'in_delivery')::int AS "inDelivery",
@@ -140,7 +141,22 @@ export function createDealerMotorRouter({
            FROM dealer_motor_units WHERE company_id = $1`,
           [req.user.company_id],
         );
-        res.json({ units: result.rows, summary: summary.rows[0] });
+        const movements = await pool.query(
+          `SELECT e.id, e.event_type AS "eventType", e.note, e.details,
+                  e.created_at AS "createdAt", u.brand, u.model, u.specification,
+                  u.frame_number AS "frameNumber", u.engine_number AS "engineNumber",
+                  b.name AS "branchName", actor.name AS "createdByName",
+                  s.spk_number AS "spkNumber"
+           FROM dealer_motor_unit_events e
+           JOIN dealer_motor_units u ON u.id = e.unit_id AND u.company_id = e.company_id
+           JOIN business_branches b ON b.id = u.branch_id AND b.company_id = u.company_id
+           LEFT JOIN users actor ON actor.id = e.created_by AND actor.company_id = e.company_id
+           LEFT JOIN dealer_motor_spks s ON s.id = e.spk_id AND s.company_id = e.company_id
+           WHERE e.company_id = $1 AND ($2::boolean OR u.branch_id = $3)
+           ORDER BY e.created_at DESC, e.id DESC LIMIT 500`,
+          [req.user.company_id, canViewAllBranches, req.user.branch_id],
+        );
+        res.json({ units: result.rows, summary: summary.rows[0], movements: movements.rows });
       } catch (error) {
         next(error);
       }
@@ -171,16 +187,27 @@ export function createDealerMotorRouter({
               unit.specification, unit.modelYear, unit.color, unit.frameNumber,
               unit.engineNumber, unit.otrPrice, unit.stockOrigin, unit.stockEntryDate],
           );
-          await client.query(
+          const event = await client.query(
             `INSERT INTO dealer_motor_unit_events
                (company_id, unit_id, created_by, event_type, note)
-             VALUES ($1, $2, $3, $4, $5)`,
+             VALUES ($1, $2, $3, $4, $5)
+             RETURNING id, event_type AS "eventType", note, details, created_at AS "createdAt"`,
             [req.user.company_id, inserted.rows[0].id, req.user.id, unit.stockOrigin,
               unit.stockOrigin === 'opening' ? 'Saldo stok awal' : 'Motor masuk'],
           );
-          return inserted.rows[0];
+          return { ...inserted.rows[0], movement: event.rows[0] };
         });
-        res.status(201).json({ unit: { ...result, branchName: branch.rows[0].name } });
+        const { movement, ...insertedUnit } = result;
+        res.status(201).json({
+          unit: { ...insertedUnit, branchName: branch.rows[0].name },
+          movement: {
+            ...movement,
+            ...insertedUnit,
+            branchName: branch.rows[0].name,
+            createdByName: req.user.name,
+            spkNumber: null,
+          },
+        });
       } catch (error) {
         if (error.code === '23505') {
           return res.status(409).json({ message: 'Nomor rangka atau nomor mesin sudah tercatat di workspace ini.' });
@@ -249,13 +276,15 @@ export function createDealerMotorRouter({
       try {
         const result = await withTransaction(pool, async (client) => {
           const unitResult = await client.query(
-            `SELECT id, branch_id AS "branchId", brand, model, specification, model_year AS "modelYear",
-                    color, frame_number AS "frameNumber", engine_number AS "engineNumber",
-                    otr_price AS "otrPrice", stock_status AS "stockStatus"
-             FROM dealer_motor_units
-             WHERE id = $1 AND company_id = $2
-               AND ($3::boolean OR branch_id = $4)
-             FOR UPDATE`,
+            `SELECT u.id, u.branch_id AS "branchId", b.name AS "branchName",
+                    u.brand, u.model, u.specification, u.model_year AS "modelYear",
+                    u.color, u.frame_number AS "frameNumber", u.engine_number AS "engineNumber",
+                    u.otr_price AS "otrPrice", u.stock_status AS "stockStatus"
+             FROM dealer_motor_units u
+             JOIN business_branches b ON b.id = u.branch_id AND b.company_id = u.company_id
+             WHERE u.id = $1 AND u.company_id = $2
+               AND ($3::boolean OR u.branch_id = $4)
+             FOR UPDATE OF u`,
             [unitId, req.user.company_id, req.user.permissions.includes('unitManage'), req.user.branch_id],
           );
           if (!unitResult.rowCount || unitResult.rows[0].stockStatus !== 'available') {
@@ -284,7 +313,32 @@ export function createDealerMotorRouter({
               customerName.trim(), customerNik, customerPhone.trim(), customerAddress.trim(),
               unit.otrPrice, JSON.stringify(details)],
           );
-          return { spk: shapeSpk({ ...unit, ...inserted.rows[0], unitId: unit.id }) };
+          const reserved = await client.query(
+            `UPDATE dealer_motor_units
+             SET stock_status = 'reserved', status_updated_at = now(), updated_at = now()
+             WHERE id = $1 AND company_id = $2 AND stock_status = 'available'
+             RETURNING stock_status AS "stockStatus", status_updated_at AS "statusUpdatedAt"`,
+            [unit.id, req.user.company_id],
+          );
+          if (!reserved.rowCount) throw invalid('Unit motor sudah dipakai pada SPK lain.', 409);
+          const movement = await client.query(
+            `INSERT INTO dealer_motor_unit_events
+               (company_id, unit_id, spk_id, created_by, event_type, note)
+             VALUES ($1, $2, $3, $4, 'reserved_for_spk', 'Unit direservasi untuk SPK menunggu verifikasi')
+             RETURNING id, event_type AS "eventType", note, details, created_at AS "createdAt"`,
+            [req.user.company_id, unit.id, inserted.rows[0].id, req.user.id],
+          );
+          return {
+            spk: shapeSpk({ ...unit, ...inserted.rows[0], unitId: unit.id }),
+            unitStatus: reserved.rows[0],
+            movement: {
+              ...movement.rows[0],
+              ...unit,
+              branchName: unit.branchName,
+              createdByName: req.user.name,
+              spkNumber,
+            },
+          };
         });
         res.status(201).json(result);
       } catch (error) {
@@ -312,6 +366,79 @@ export function createDealerMotorRouter({
       }
     });
 
+  router.patch('/spks/:id/reject', authenticate, requireTenant, requireActiveTenant,
+    requirePermission('spkVerify', 'spkApprove'), async (req, res, next) => {
+      if (!uuidPattern.test(req.params.id)) return res.status(400).json({ message: 'SPK tidak valid.' });
+      const reason = typeof req.body.reason === 'string' ? req.body.reason.trim() : '';
+      if (reason.length > 300) return res.status(400).json({ message: 'Alasan penolakan terlalu panjang.' });
+      try {
+        const rejected = await withTransaction(pool, async (client) => {
+          const result = await client.query(
+            `SELECT id, unit_id AS "unitId", status
+             FROM dealer_motor_spks
+             WHERE id = $1 AND company_id = $2
+             FOR UPDATE`,
+            [req.params.id, req.user.company_id],
+          );
+          if (!result.rowCount) throw invalid('SPK tidak ditemukan.', 404);
+          const spk = result.rows[0];
+          const canReject = (spk.status === 'SUBMITTED' && req.user.permissions.includes('spkVerify'))
+            || (spk.status === 'APPROVAL SVP' && req.user.permissions.includes('spkApprove'));
+          if (!canReject) throw invalid('SPK tidak dapat ditolak pada tahap ini.', 403);
+
+          const updated = await client.query(
+            `UPDATE dealer_motor_spks
+             SET status = 'DITOLAK', updated_at = now()
+             WHERE id = $1 AND company_id = $2 AND status = $3
+             RETURNING id, spk_number AS "spkNumber", status`,
+            [spk.id, req.user.company_id, spk.status],
+          );
+          if (!updated.rowCount) throw invalid('Status SPK sudah berubah.', 409);
+
+          let unitStatus = null;
+          const unit = await client.query(
+            `SELECT id, stock_status AS "stockStatus"
+             FROM dealer_motor_units
+             WHERE id = $1 AND company_id = $2
+             FOR UPDATE`,
+            [spk.unitId, req.user.company_id],
+          );
+          if (!unit.rowCount) throw invalid('Unit motor tidak ditemukan.', 404);
+          const otherPendingSpk = await client.query(
+            `SELECT 1 FROM dealer_motor_spks
+             WHERE company_id = $1 AND unit_id = $2 AND id <> $3
+               AND status IN ('SUBMITTED', 'APPROVAL SVP')
+             LIMIT 1`,
+            [req.user.company_id, spk.unitId, spk.id],
+          );
+          if (!otherPendingSpk.rowCount && unit.rows[0].stockStatus === 'reserved') {
+            const released = await client.query(
+              `UPDATE dealer_motor_units
+               SET stock_status = 'available', status_updated_at = now(), updated_at = now()
+               WHERE id = $1 AND company_id = $2 AND stock_status = 'reserved'
+               RETURNING stock_status AS "stockStatus", status_updated_at AS "statusUpdatedAt"`,
+              [spk.unitId, req.user.company_id],
+            );
+            if (released.rowCount) {
+              unitStatus = released.rows[0];
+              await client.query(
+                `INSERT INTO dealer_motor_unit_events
+                   (company_id, unit_id, spk_id, created_by, event_type, note, details)
+                 VALUES ($1, $2, $3, $4, 'reservation_released',
+                         'Unit dikembalikan ke stok setelah SPK ditolak', $5)`,
+                [req.user.company_id, spk.unitId, spk.id, req.user.id, JSON.stringify({ reason })],
+              );
+            }
+          }
+          return { ...updated.rows[0], unitStatus };
+        });
+        res.json({ spk: rejected });
+      } catch (error) {
+        if (error.status) return res.status(error.status).json({ message: error.message });
+        next(error);
+      }
+    });
+
   router.patch('/spks/:id/approve', authenticate, requireTenant, requireActiveTenant,
     requirePermission('spkApprove'), async (req, res, next) => {
       if (!uuidPattern.test(req.params.id)) return res.status(400).json({ message: 'SPK tidak valid.' });
@@ -326,17 +453,19 @@ export function createDealerMotorRouter({
           if (!spkResult.rowCount) throw invalid('SPK sudah diproses atau tidak ditemukan.', 409);
           const unitResult = await client.query(
             `SELECT id FROM dealer_motor_units
-             WHERE id = $1 AND company_id = $2 AND stock_status = 'available'
+             WHERE id = $1 AND company_id = $2 AND stock_status = 'reserved'
              FOR UPDATE`,
             [spkResult.rows[0].unit_id, req.user.company_id],
           );
           if (!unitResult.rowCount) throw invalid('Unit sudah digunakan oleh SPK lain.', 409);
-          await client.query(
+          const updatedUnit = await client.query(
             `UPDATE dealer_motor_units
              SET stock_status = 'approved_for_delivery', status_updated_at = now(), updated_at = now()
-             WHERE id = $1 AND company_id = $2`,
+             WHERE id = $1 AND company_id = $2 AND stock_status = 'reserved'
+             RETURNING id`,
             [unitResult.rows[0].id, req.user.company_id],
           );
+          if (!updatedUnit.rowCount) throw invalid('Unit motor sudah berubah status.', 409);
           await client.query(
             `UPDATE dealer_motor_spks
              SET status = 'DISETUJUI', delivery_status = 'ready',
@@ -412,12 +541,13 @@ export function createDealerMotorRouter({
              WHERE id = $2 AND company_id = $3`,
             [req.user.id, req.params.id, req.user.company_id],
           );
-          await client.query(
+          const updatedUnit = await client.query(
             `UPDATE dealer_motor_units
              SET stock_status = 'in_delivery', status_updated_at = now(), updated_at = now()
              WHERE id = $1 AND company_id = $2 AND stock_status = 'approved_for_delivery'`,
             [result.rows[0].unit_id, req.user.company_id],
           );
+          if (!updatedUnit.rowCount) throw invalid('Status stok unit tidak sesuai dengan pengiriman.', 409);
           await client.query(
             `INSERT INTO dealer_motor_unit_events
                (company_id, unit_id, spk_id, created_by, event_type, note)
@@ -479,12 +609,13 @@ export function createDealerMotorRouter({
             [fileName, latitude, longitude, req.params.id, req.user.company_id, req.user.id],
           );
           if (!result.rowCount) throw invalid('Status pengiriman sudah berubah.', 409);
-          await client.query(
+          const updatedUnit = await client.query(
             `UPDATE dealer_motor_units
              SET stock_status = 'delivered', status_updated_at = now(), updated_at = now()
              WHERE id = $1 AND company_id = $2 AND stock_status = 'in_delivery'`,
             [result.rows[0].unitId, req.user.company_id],
           );
+          if (!updatedUnit.rowCount) throw invalid('Status stok unit tidak sesuai dengan serah-terima.', 409);
           await client.query(
             `INSERT INTO dealer_motor_unit_events
                (company_id, unit_id, spk_id, created_by, event_type, note, details)

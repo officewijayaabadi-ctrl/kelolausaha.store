@@ -21,13 +21,32 @@ const rupiah = (value) => new Intl.NumberFormat('id-ID', {
   maximumFractionDigits: 0,
 }).format(Number(value) || 0);
 
+const dateTime = (value) => {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime())
+    ? '—'
+    : new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short' }).format(parsed);
+};
+
+const movementLabels = {
+  opening: 'Masuk · Stok awal',
+  incoming: 'Masuk · Motor masuk',
+  reserved_for_spk: 'Reservasi · SPK disubmit',
+  reservation_released: 'Masuk kembali · SPK ditolak',
+  approved_for_delivery: 'Proses keluar · SPK disetujui',
+  in_delivery: 'Proses keluar · Driver mengambil',
+  delivered: 'Keluar · Terkirim/terjual',
+};
+
 function StockSummary({ units }) {
   const count = (predicate) => units.filter(predicate).length;
   const cards = [
     ['Stok awal', count((unit) => unit.stockOrigin === 'opening')],
     ['Motor masuk', count((unit) => unit.stockOrigin === 'incoming')],
+    ['SPK diproses', count((unit) => unit.stockStatus === 'reserved')],
+    ['Menunggu driver', count((unit) => unit.stockStatus === 'approved_for_delivery')],
     ['Dalam proses kirim', count((unit) => unit.stockStatus === 'in_delivery')],
-    ['Terkirim', count((unit) => unit.stockStatus === 'delivered')],
+    ['Motor keluar', count((unit) => unit.stockStatus === 'delivered')],
     ['Stok akhir', count((unit) => unit.stockStatus === 'available')],
   ];
   return <div className="activation-summary-grid finance-summary-grid">
@@ -42,6 +61,7 @@ export function DealerMotorWorkspace({
   units,
   branches,
   canManage,
+  movements = [],
   notice,
   onCreate,
 }) {
@@ -95,17 +115,35 @@ export function DealerMotorWorkspace({
     </form>}
     <section className="table-card full-table">
       <div className="table-heading"><div><h2>Daftar unit</h2><p>{units.length} unit tercatat</p></div></div>
-      <div className="table-scroll"><table><thead><tr><th>TANGGAL MASUK</th><th>CABANG</th><th>MOTOR</th><th>TAHUN / WARNA</th><th>NO. RANGKA</th><th>NO. MESIN</th><th>HARGA OTR</th><th>STATUS</th></tr></thead><tbody>
+      <div className="table-scroll"><table><thead><tr><th>TANGGAL MASUK</th><th>CABANG</th><th>MOTOR</th><th>TAHUN / WARNA</th><th>NO. RANGKA</th><th>NO. MESIN</th><th>HARGA OTR</th><th>STATUS</th><th>MUTASI TERAKHIR</th></tr></thead><tbody>
         {units.map((unit) => <tr key={unit.id}>
           <td>{unit.stockEntryDate}</td><td>{unit.branchName || '—'}</td>
           <td>{unit.brand} {unit.model} {unit.specification}</td>
           <td>{unit.modelYear} / {unit.color}</td><td>{unit.frameNumber}</td><td>{unit.engineNumber}</td>
           <td className="amount">{rupiah(unit.otrPrice)}</td>
           <td>{unit.stockStatus === 'available' ? 'Tersedia'
+            : unit.stockStatus === 'reserved' ? 'SPK diproses'
             : unit.stockStatus === 'approved_for_delivery' ? 'Menunggu driver'
               : unit.stockStatus === 'in_delivery' ? 'Dalam proses kirim' : 'Terkirim'}</td>
+          <td>{dateTime(unit.statusUpdatedAt)}</td>
         </tr>)}
-        {!units.length && <tr><td colSpan="8">Belum ada unit. Tambahkan stok awal atau motor masuk.</td></tr>}
+        {!units.length && <tr><td colSpan="9">Belum ada unit. Tambahkan stok awal atau motor masuk.</td></tr>}
+      </tbody></table></div>
+    </section>
+    <section className="table-card full-table">
+      <div className="table-heading"><div><h2>Riwayat stok masuk/keluar</h2><p>{movements.length} mutasi terakhir</p></div></div>
+      <div className="table-scroll"><table><thead><tr><th>TANGGAL</th><th>ARUS STOK</th><th>CABANG</th><th>MOTOR</th><th>NO. RANGKA</th><th>SPK</th><th>PETUGAS</th><th>KETERANGAN</th></tr></thead><tbody>
+        {movements.map((movement) => <tr key={movement.id}>
+          <td>{dateTime(movement.createdAt)}</td>
+          <td>{movementLabels[movement.eventType] || movement.eventType}</td>
+          <td>{movement.branchName || '—'}</td>
+          <td>{movement.brand} {movement.model} {movement.specification}</td>
+          <td>{movement.frameNumber}</td>
+          <td>{movement.spkNumber || '—'}</td>
+          <td>{movement.createdByName || '—'}</td>
+          <td>{movement.note}</td>
+        </tr>)}
+        {!movements.length && <tr><td colSpan="8">Belum ada mutasi stok.</td></tr>}
       </tbody></table></div>
     </section>
   </section>;

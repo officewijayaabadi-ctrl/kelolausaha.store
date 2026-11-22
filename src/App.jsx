@@ -955,6 +955,7 @@ function App() {
   const [financeEntries, setFinanceEntries] = useState([]);
   const [workspaceBranches, setWorkspaceBranches] = useState([]);
   const [dealerMotorUnits, setDealerMotorUnits] = useState(previewDealerMotorUnits);
+  const [dealerMotorMovements, setDealerMotorMovements] = useState([]);
   const [financeBranchId, setFinanceBranchId] = useState('');
   const [financeDraft, setFinanceDraft] = useState({
     type: 'income',
@@ -1570,6 +1571,9 @@ function App() {
         const result = await response.json();
         if (!response.ok) throw new Error(result.message || 'SPK tidak dapat disimpan.');
         if (!result.spk?.id || !result.spk?.spkNumber) throw new Error('Data SPK dari server tidak valid.');
+        if (!result.unitStatus?.stockStatus || !result.movement?.id) {
+          throw new Error('Status stok motor dari server tidak valid.');
+        }
         setSpks((current) => [result.spk, ...current]);
         const receipt = {
           receiptNumber: `KWB${dateCode.slice(2, 6)}.${String(motorReceipts.filter((entry) => entry.date === form.date).length + 1).padStart(5, '0')}`,
@@ -1590,7 +1594,10 @@ function App() {
           note: form.receiptNote.trim() || `Pembayaran ${form.customer}`,
         };
         setMotorReceipts((current) => [receipt, ...current]);
-        setDealerMotorUnits((current) => current.filter((unit) => unit.id !== selectedUnit.id));
+        setDealerMotorUnits((current) => current.map((unit) => (
+          unit.id === selectedUnit.id ? { ...unit, ...result.unitStatus } : unit
+        )));
+        setDealerMotorMovements((current) => [result.movement, ...current]);
         openPage(activeUser.permissions.includes('spkViewAll') ? 'Semua SPK' : 'SPK Saya');
         setNotice(`${result.spk.spkNumber} berhasil disimpan dan menunggu verifikasi Admin.`);
         return;
@@ -1678,6 +1685,48 @@ function App() {
     'SELESAI',
     'disetujui',
   );
+
+  const rejectSpk = async (spk) => {
+    const permission = spk.status === 'SUBMITTED' ? 'spkVerify' : 'spkApprove';
+    if (!activeUser.permissions.includes(permission)) {
+      setNotice('Akun ini tidak memiliki hak akses untuk menolak SPK pada tahap ini.');
+      return;
+    }
+    if (!['SUBMITTED', 'APPROVAL SVP'].includes(spk.status)) {
+      setNotice(`Status ${spk.spkNumber || spk.id} sudah berubah dan tidak dapat ditolak.`);
+      return;
+    }
+    if (isAuthenticated) {
+      try {
+        const response = await fetch(`/api/dealer-motor/spks/${spk.id}/reject`, { method: 'PATCH' });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message || 'SPK tidak dapat ditolak.');
+        if (result.spk?.status !== 'DITOLAK') throw new Error('Status penolakan SPK dari server tidak valid.');
+        setSpks((current) => current.map((item) => (
+          item.id === spk.id ? { ...item, status: result.spk.status } : item
+        )));
+        if (result.spk.unitStatus?.stockStatus) {
+          setDealerMotorUnits((current) => current.map((unit) => (
+            unit.id === spk.unitId ? { ...unit, ...result.spk.unitStatus } : unit
+          )));
+        }
+        setNotice(`${spk.spkNumber || spk.id} ditolak.`);
+        return;
+      } catch (error) {
+        setNotice(error.message);
+        return;
+      }
+    }
+    setSpks((current) => current.map((item) => (
+      item.id === spk.id ? { ...item, status: 'DITOLAK' } : item
+    )));
+    setDealerMotorUnits((current) => current.map((unit) => (
+      unit.id === spk.unitId && unit.stockStatus === 'reserved'
+        ? { ...unit, stockStatus: 'available', statusUpdatedAt: new Date().toISOString() }
+        : unit
+    )));
+    setNotice(`${spk.spkNumber || spk.id} ditolak.`);
+  };
 
   const editUserAccess = (user) => {
     setAccessDraft({ ...user, permissions: [...user.permissions] });
@@ -1778,6 +1827,7 @@ function App() {
     setUsers([user]);
     setActiveUserId(user.id);
     setDealerMotorUnits([]);
+    setDealerMotorMovements([]);
     setSpks([]);
     setWorkspaceBranches([]);
     const businessName = result.business?.name || (user.role === 'PLATFORM_OWNER' ? 'KelolaUsaha.store' : workspaceName);
@@ -2111,13 +2161,16 @@ function App() {
         const unitsResult = unitsIndex >= 0 ? await responses[unitsIndex].json() : null;
         const branchesResult = branchesIndex >= 0 ? await responses[branchesIndex].json() : null;
         const spksResult = spksIndex >= 0 ? await responses[spksIndex].json() : null;
-        if ((unitsResult && !Array.isArray(unitsResult.units))
+        if ((unitsResult && (!Array.isArray(unitsResult.units) || !Array.isArray(unitsResult.movements)))
           || (branchesResult && !Array.isArray(branchesResult.branches))
           || (spksResult && !Array.isArray(spksResult.spks))) {
           throw new Error('Data stok, cabang, atau SPK dari server tidak valid.');
         }
         if (cancelled) return;
-        if (unitsResult) setDealerMotorUnits(unitsResult.units);
+        if (unitsResult) {
+          setDealerMotorUnits(unitsResult.units);
+          setDealerMotorMovements(unitsResult.movements);
+        }
         if (branchesResult) setWorkspaceBranches(branchesResult.branches);
         if (spksResult) setSpks(spksResult.spks);
       } catch (error) {
@@ -2128,7 +2181,7 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [activeUser.id, activeUser.permissions, isAuthenticated, needsBusinessSetup, workspaceModules]);
+  }, [activePage, activeUser.id, activeUser.permissions, isAuthenticated, needsBusinessSetup, workspaceModules]);
 
   useEffect(() => {
     if (!themeSettings.faviconUrl) return undefined;
@@ -2816,6 +2869,7 @@ function App() {
           <DealerMotorWorkspace
             branches={workspaceBranches}
             canManage={isAuthenticated && activeUser.permissions.includes('unitManage')}
+            movements={dealerMotorMovements}
             notice={notice}
             onCreate={async (unit) => {
               if (!isAuthenticated) throw new Error('Masuk ke workspace untuk menyimpan stok motor.');
@@ -2826,8 +2880,9 @@ function App() {
               });
               const result = await response.json();
               if (!response.ok) throw new Error(result.message || 'Unit motor tidak dapat disimpan.');
-              if (!result.unit?.id) throw new Error('Data unit motor dari server tidak valid.');
+              if (!result.unit?.id || !result.movement?.id) throw new Error('Data unit motor dari server tidak valid.');
               setDealerMotorUnits((current) => [result.unit, ...current]);
+              setDealerMotorMovements((current) => [result.movement, ...current]);
               setNotice('Unit motor berhasil disimpan ke stok cabang.');
             }}
             units={dealerMotorUnits}
@@ -3107,8 +3162,13 @@ function App() {
               <div className="table-scroll"><table><thead><tr><th>NOMOR SPK</th><th>CUSTOMER</th><th>KENDARAAN</th><th>SALES</th><th>NILAI OTR</th><th>STATUS</th><th /></tr></thead><tbody>
                 {spks.map((item) => <tr key={item.id}><td><strong className="spk-id">{item.spkNumber || item.id}</strong><small>{item.date || item.createdDate}</small></td><td><strong>{item.customer}</strong><small>Customer</small></td><td>{item.motor}</td><td>{item.sales}</td><td className="amount">{rupiah(item.amount)}</td><td><span className={`status-badge ${statusClass(item.status)}`}><span />{item.status}</span></td><td className="spk-actions">
                   {activeUser.permissions.includes('spkVerify') && ['SUBMITTED', 'VERIFIKASI ADMIN'].includes(item.status) && <button aria-label={`Verifikasi SPK ${item.spkNumber || item.id}`} className="button button-quiet" onClick={() => verifySpk(item)} type="button">Verifikasi SPK</button>}
+                  {activeUser.permissions.includes('spkVerify') && item.status === 'SUBMITTED' && <button aria-label={`Tolak SPK ${item.spkNumber || item.id}`} className="button button-quiet" onClick={() => rejectSpk(item)} type="button">Tolak SPK</button>}
                   {activeUser.permissions.includes('spkApprove') && item.status === 'APPROVAL SVP' && <button aria-label={`Setujui SPK ${item.spkNumber || item.id}`} className="button button-primary" onClick={() => approveSpk(item)} type="button">Setujui SPK</button>}
-                  {!['SUBMITTED', 'VERIFIKASI ADMIN', 'APPROVAL SVP'].includes(item.status) && <span aria-label="Tidak ada tindakan SPK">—</span>}
+                  {activeUser.permissions.includes('spkApprove') && item.status === 'APPROVAL SVP' && <button aria-label={`Tolak SPK ${item.spkNumber || item.id}`} className="button button-quiet" onClick={() => rejectSpk(item)} type="button">Tolak SPK</button>}
+                  {!['SUBMITTED', 'VERIFIKASI ADMIN', 'APPROVAL SVP'].includes(item.status)
+                    || (item.status === 'SUBMITTED' && !activeUser.permissions.includes('spkVerify'))
+                    || (item.status === 'APPROVAL SVP' && !activeUser.permissions.includes('spkApprove'))
+                    ? <span aria-label="Tidak ada tindakan SPK">—</span> : null}
                 </td></tr>)}
               </tbody></table></div>
             </section>
