@@ -6,6 +6,15 @@ on:
     branches:
        - wijaya-abadi
   workflow_dispatch:
+    inputs:
+      action:
+        description: Run deployment or inspect tenant TLS configuration
+        required: true
+        type: choice
+        options:
+          - deploy
+          - inspect_tls
+        default: deploy
 
 permissions:
   contents: read
@@ -16,7 +25,30 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Inspect tenant TLS configuration
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.action == 'inspect_tls' }}
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          script: |
+            set -eu
+            echo "=== NGINX TLS VHOSTS ==="
+            if command -v nginx >/dev/null 2>&1; then
+              sudo nginx -T 2>/dev/null | grep -E 'server_name|listen .*443|ssl_certificate |proxy_pass ' | sort -u | head -100 || true
+            else
+              echo "nginx is not installed"
+            fi
+            echo "=== CERTBOT CERTIFICATES ==="
+            if command -v certbot >/dev/null 2>&1; then
+              sudo certbot certificates 2>&1 | grep -E 'Certificate Name:|Domains:|Expiry Date:|Certificate Path:|Private Key Path:' || true
+            else
+              echo "certbot is not installed"
+            fi
       - name: Deploy through SSH
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.action == 'deploy' }}
         uses: appleboy/ssh-action@v1.2.0
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
