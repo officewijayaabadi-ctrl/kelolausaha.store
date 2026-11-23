@@ -370,6 +370,46 @@ jobs:
             }
             JS
 
+            echo "Verifying Gmail IMAP connection..."
+            node --input-type=module <<'JS'
+            import 'dotenv/config';
+            import { ImapFlow } from 'imapflow';
+
+            const user = process.env.IMAP_USER || process.env.SMTP_USER || process.env.SMTP_FROM;
+            const password = process.env.IMAP_PASSWORD || process.env.SMTP_PASSWORD;
+            if (!user || !password) {
+              console.error('IMAP settings are incomplete. Check IMAP_USER and IMAP_PASSWORD.');
+              process.exit(1);
+            }
+
+            const client = new ImapFlow({
+              host: process.env.IMAP_HOST || 'imap.gmail.com',
+              port: Number(process.env.IMAP_PORT) || 993,
+              secure: process.env.IMAP_SECURE !== 'false',
+              auth: { user, pass: password },
+              logger: false,
+            });
+
+            try {
+              await client.connect();
+              const mailboxes = await client.list();
+              const hasInbox = mailboxes.some(({ path }) => path.toUpperCase() === 'INBOX');
+              const hasSent = mailboxes.some(({ path, specialUse }) => (
+                specialUse?.toLowerCase() === '\\sent' || /\bsent\b/i.test(path)
+              ));
+              if (!hasInbox || !hasSent) {
+                throw new Error('Gmail INBOX or Sent folder is unavailable.');
+              }
+              console.log('Gmail IMAP connection verified; INBOX and Sent folders are available.');
+            } catch (error) {
+              const code = error?.code || 'unknown';
+              console.error(`IMAP verification failed (${code}). Check Gmail IMAP access, App Password, host, port, and TLS settings.`);
+              process.exitCode = 1;
+            } finally {
+              if (client.usable) await client.logout();
+            }
+            JS
+
             echo "Running database migrations..."
             npm run db:migrate
 

@@ -349,9 +349,12 @@ async function sendSupportEmail({ to, subject, text, ticketNumber }) {
 }
 
 async function ingestGmailReplies() {
-  const user = process.env.IMAP_USER || configuredSupportEmail();
+  const user = process.env.IMAP_USER || configuredSmtpUser() || configuredSupportEmail();
   const password = process.env.IMAP_PASSWORD || process.env.SMTP_PASSWORD;
-  if (!user || !password || gmailSyncInProgress) return;
+  if (gmailSyncInProgress) return;
+  if (!user || !password) {
+    throw new Error('IMAP belum dikonfigurasi. Atur IMAP_USER dan IMAP_PASSWORD.');
+  }
   gmailSyncInProgress = true;
 
   const client = new ImapFlow({
