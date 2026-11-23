@@ -1,6 +1,8 @@
 export async function processInboundSupportEmail({
   mailboxUser,
   message,
+  mailboxKind = 'inbox',
+  mailboxPath = 'INBOX',
   pool,
   sendEmail,
   supportEmail,
@@ -14,9 +16,10 @@ export async function processInboundSupportEmail({
   const senderEmail = message.from?.value?.[0]?.address?.toLowerCase()
     || supportEmail.toLowerCase();
   const isSupportReply = senderEmail === supportEmail.toLowerCase();
+  const isSentMailbox = mailboxKind === 'sent';
   const isEmailReply = Boolean(message.inReplyTo || message.references?.length)
     || /^\s*(?:re|aw|sv):/i.test(message.subject || '');
-  if (isSupportReply && !isEmailReply) return;
+  if (isSupportReply && !isSentMailbox && !isEmailReply) return;
 
   const ticketResult = await pool.query(
     'SELECT * FROM support_tickets WHERE ticket_number = $1',
@@ -25,16 +28,23 @@ export async function processInboundSupportEmail({
   if (!ticketResult.rowCount) return;
 
   const ticket = ticketResult.rows[0];
+  if (isSupportReply && isSentMailbox) {
+    const sentToRequester = message.to?.value?.some(
+      (recipient) => recipient.address?.toLowerCase() === ticket.requester_email.toLowerCase(),
+    );
+    if (!sentToRequester) return;
+  }
+
   const senderType = isSupportReply ? 'owner' : 'user';
   const body = String(message.text || message.html || '').trim().slice(0, 5000);
   if (!body) return;
 
-  const emailMessageId = message.messageId || `${mailboxUser}:${uid}`;
+  const emailMessageId = message.messageId || `${mailboxUser}:${mailboxPath}:${uid}`;
   const insertResult = await pool.query(`
     INSERT INTO support_messages (
       ticket_id, sender_type, sender_name, sender_email, body,
       email_message_id, email_direction
-    ) VALUES ($1, $2, $3, $4, $5, $6, 'inbound')
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7)
     ON CONFLICT (email_message_id) WHERE email_message_id IS NOT NULL
     DO NOTHING
     RETURNING id, email_forwarded_at
@@ -45,6 +55,7 @@ export async function processInboundSupportEmail({
     senderEmail,
     body,
     emailMessageId,
+    isSupportReply ? 'outbound' : 'inbound',
   ]);
   const messageRow = insertResult.rowCount
     ? insertResult.rows[0]
@@ -59,7 +70,7 @@ export async function processInboundSupportEmail({
     [isSupportReply ? 'waiting_user' : 'new', ticketNumber],
   );
 
-  if (isSupportReply && !messageRow.email_forwarded_at) {
+  if (isSupportReply && !isSentMailbox && !messageRow.email_forwarded_at) {
     await sendEmail({
       to: ticket.requester_email,
       subject: `Balasan: ${ticket.subject}`,

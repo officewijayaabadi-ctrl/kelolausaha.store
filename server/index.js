@@ -37,6 +37,8 @@ const privateDeliveryDirectory = process.env.PRIVATE_DELIVERY_DIR
   : resolve(uploadDirectory, '..', 'delivery-private');
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 2 * 1024 * 1024 } });
 const otpRateLimits = new Map();
+const sentSupportMailboxCursors = new Map();
+let gmailSyncInProgress = false;
 const themeIds = new Set(['blue-professional', 'green-fresh', 'purple-elegant', 'orange-cheerful', 'pink-sweet', 'teal-modern', 'navy-elegant', 'yellow-warm', 'gray-minimal', 'white-clean']);
 const imageExtensions = new Set(['png', 'jpg', 'webp', 'ico']);
 const permissionSets = {
@@ -53,6 +55,14 @@ const permissionSets = {
   PLATFORM_OWNER: ['dashboard', 'platformBusinesses', 'platformBilling'],
   'Customer': ['dashboard', 'spkCreate', 'spkViewAll', 'spkVerify', 'customerManage', 'salesManage', 'unitManage', 'leasingManage', 'posAccess', 'priceManage', 'transactionsView', 'receiptsView', 'attendanceView']
 };
+const operationalTeamRoles = ['HRD', 'SVP', 'SPV', 'KEPALA TOKO', 'ADMIN', 'SALES', 'KASIR', 'DRIVER'];
+const platformPermissionIds = new Set(['platformBusinesses', 'platformBilling', 'supportManage']);
+const superAdminRestrictedPermissions = new Set([
+  'reportsView', 'targetManage', 'financeView', 'financeManage', 'activationManage',
+]);
+const editablePermissionIds = new Set(Object.values(permissionSets)
+  .flat()
+  .filter((permission) => !platformPermissionIds.has(permission)));
 
 function hash(value) {
   return createHash('sha256').update(value).digest('hex');
@@ -341,7 +351,8 @@ async function sendSupportEmail({ to, subject, text, ticketNumber }) {
 async function ingestGmailReplies() {
   const user = process.env.IMAP_USER || configuredSupportEmail();
   const password = process.env.IMAP_PASSWORD || process.env.SMTP_PASSWORD;
-  if (!user || !password) return;
+  if (!user || !password || gmailSyncInProgress) return;
+  gmailSyncInProgress = true;
 
   const client = new ImapFlow({
     host: process.env.IMAP_HOST || 'imap.gmail.com',
@@ -351,27 +362,74 @@ async function ingestGmailReplies() {
     logger: false,
   });
 
-  await client.connect();
+  let connected = false;
   try {
-    const lock = await client.getMailboxLock('INBOX');
-    try {
-      for await (const message of client.fetch({ seen: false }, { source: true, envelope: true, uid: true })) {
-        const parsed = await simpleParser(message.source);
-        await processInboundSupportEmail({
-          mailboxUser: user,
-          message: parsed,
-          pool,
-          sendEmail: sendSupportEmail,
-          supportEmail: configuredSupportEmail(),
-          uid: message.uid,
-        });
-        await client.messageFlagsAdd(message.uid, ['Seen'], { uid: true });
+    await client.connect();
+    connected = true;
+    const supportEmail = configuredSupportEmail();
+    const mailboxes = await client.list();
+    const sentMailbox = mailboxes.find(({ path, specialUse }) => (
+      specialUse?.toLowerCase() === '\\sent' || /\bsent\b/i.test(path)
+    ));
+
+    const syncMailbox = async (mailboxPath, mailboxKind) => {
+      const lock = await client.getMailboxLock(mailboxPath);
+      try {
+        let searchQuery;
+        let highestUid = null;
+        if (mailboxKind === 'inbox') {
+          searchQuery = { seen: false };
+        } else {
+          highestUid = Math.max(0, Number(client.mailbox?.uidNext || 1) - 1);
+          const previousUid = sentSupportMailboxCursors.get(mailboxPath);
+          if (previousUid !== undefined && previousUid >= highestUid) return;
+          searchQuery = previousUid === undefined
+            ? { since: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }
+            : { uid: `${previousUid + 1}:${highestUid}` };
+        }
+
+        const uids = await client.search(searchQuery, { uid: true });
+        if (uids === false || uids === undefined) {
+          throw new Error(`Mailbox ${mailboxPath} tidak dapat dicari.`);
+        }
+        if (uids.length) {
+          for await (const message of client.fetch(
+            uids,
+            { source: true, envelope: true },
+            { uid: true },
+          )) {
+            const parsed = await simpleParser(message.source);
+            await processInboundSupportEmail({
+              mailboxUser: user,
+              mailboxKind,
+              mailboxPath,
+              message: parsed,
+              pool,
+              sendEmail: sendSupportEmail,
+              supportEmail,
+              uid: message.uid,
+            });
+            if (mailboxKind === 'inbox') {
+              await client.messageFlagsAdd(message.uid, ['Seen'], { uid: true });
+            }
+          }
+        }
+        if (mailboxKind === 'sent') sentSupportMailboxCursors.set(mailboxPath, highestUid);
+      } finally {
+        lock.release();
       }
-    } finally {
-      lock.release();
+    };
+
+    await syncMailbox('INBOX', 'inbox');
+    if (sentMailbox && sentMailbox.path !== 'INBOX') {
+      await syncMailbox(sentMailbox.path, 'sent');
     }
   } finally {
-    await client.logout();
+    try {
+      if (connected) await client.logout();
+    } finally {
+      gmailSyncInProgress = false;
+    }
   }
 }
 
@@ -894,6 +952,75 @@ app.get('/api/team/members', authenticate, requireRole('OWNER', 'SUPER ADMIN'), 
     });
   } catch (error) {
     next(error);
+  }
+});
+
+app.patch('/api/team/members/:id/access', authenticate, requireRole('OWNER', 'SUPER ADMIN'), requireTenant, requireActiveTenant, async (req, res, next) => {
+  const { role, permissions, active } = req.body || {};
+  const allowedRoles = ['SUPER ADMIN', ...operationalTeamRoles];
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(req.params.id)
+    || !allowedRoles.includes(role)
+    || !Array.isArray(permissions)
+    || permissions.length > editablePermissionIds.size
+    || permissions.some((permission) => typeof permission !== 'string' || !editablePermissionIds.has(permission))
+    || new Set(permissions).size !== permissions.length
+    || typeof active !== 'boolean') {
+    return res.status(400).json({ message: 'Pengaturan peran atau hak akses tidak valid.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const targetResult = await client.query(
+      'SELECT id, role FROM users WHERE id = $1 AND company_id = $2 FOR UPDATE',
+      [req.params.id, req.user.company_id],
+    );
+    const target = targetResult.rows[0];
+    if (!target) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ message: 'Pengguna tidak ditemukan pada workspace ini.' });
+    }
+    if (target.id === req.user.id || ['OWNER', 'PLATFORM_OWNER'].includes(target.role)) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ message: 'Akun Owner dan akun Anda sendiri tidak dapat diubah dari pengaturan ini.' });
+    }
+    if (req.user.role === 'SUPER ADMIN' && role === 'SUPER ADMIN' && target.role !== 'SUPER ADMIN') {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ message: 'Hanya Owner yang dapat menetapkan peran Super Admin.' });
+    }
+
+    const businessPermissions = filterPermissionsForBusiness(
+      permissions,
+      req.user.business_type,
+      req.user.modules,
+    );
+    const savedPermissions = role === 'SUPER ADMIN'
+      ? businessPermissions.filter((permission) => !superAdminRestrictedPermissions.has(permission))
+      : businessPermissions;
+    const result = await client.query(
+      `UPDATE users
+       SET role = $1, permissions = $2::jsonb, active = $3
+       WHERE id = $4 AND company_id = $5
+       RETURNING id, name, email, role, permissions, active,
+                 approval_status AS "approvalStatus", created_at AS "createdAt"`,
+      [role, JSON.stringify(savedPermissions), active, target.id, req.user.company_id],
+    );
+    await client.query('COMMIT');
+    return res.json({
+      user: {
+        ...result.rows[0],
+        permissions: filterPermissionsForBusiness(
+          result.rows[0].permissions,
+          req.user.business_type,
+          req.user.modules,
+        ),
+      },
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    return next(error);
+  } finally {
+    client.release();
   }
 });
 
@@ -1628,21 +1755,28 @@ app.post('/api/platform/support/tickets/:ticketId/reply', authenticate, requireR
     const ticketResult = await pool.query('SELECT * FROM support_tickets WHERE id = $1', [req.params.ticketId]);
     if (!ticketResult.rowCount) return res.status(404).json({ message: 'Percakapan tidak ditemukan.' });
     const ticket = ticketResult.rows[0];
-    await pool.query(
+    const savedMessage = await pool.query(
       `INSERT INTO support_messages (ticket_id, sender_type, sender_name, sender_email, body, email_direction)
-       VALUES ($1, 'owner', 'Owner KelolaUsaha.store', $2, $3, 'outbound')`,
+       VALUES ($1, 'owner', 'Owner KelolaUsaha.store', $2, $3, 'outbound')
+       RETURNING id`,
       [ticket.id, configuredSmtpUser(), body],
     );
     await pool.query(
       `UPDATE support_tickets SET status = $1, updated_at = now() WHERE id = $2`,
       [status, ticket.id],
     );
-    await sendSupportEmail({
+    const sentEmail = await sendSupportEmail({
       to: ticket.requester_email,
       subject: `Balasan: ${ticket.subject}`,
       ticketNumber: ticket.ticket_number,
       text: `Halo ${ticket.requester_name},\n\n${body}\n\nTim KelolaUsaha.store\n\nNomor tiket: ${ticket.ticket_number}`,
     });
+    if (sentEmail.messageId) {
+      await pool.query(
+        'UPDATE support_messages SET email_message_id = $1 WHERE id = $2',
+        [sentEmail.messageId, savedMessage.rows[0].id],
+      );
+    }
     res.json({ ok: true });
   } catch (error) {
     next(error);

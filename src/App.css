@@ -713,6 +713,15 @@ td .spk-id { color: #316d50; font-size: 9px; }
 .pos-product strong { font-size: 10px; }
 .pos-product small, .pos-cart-row small { color: #89968e; font-size: 9px; }
 .pos-cart .table-heading { min-height: 59px; }
+.pos-receipt-settings { display: grid; gap: 7px; margin: 12px 16px 0; padding: 10px 11px; border: 1px solid #e8edea; border-radius: 7px; color: #64746a; background: #f8fbf8; font-size: 9px; }
+.pos-receipt-settings-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; color: #415449; }
+.pos-receipt-settings-heading strong { color: var(--theme-primary, #28734e); font-size: 9px; }
+.pos-receipt-settings-accent { display: inline-flex; align-items: center; gap: 6px; }
+.pos-receipt-settings-accent i { width: 9px; height: 9px; border-radius: 50%; }
+.pos-receipt-settings > small { color: #829087; line-height: 1.5; }
+.pos-receipt-settings-details { border-top: 1px solid #e8edea; padding-top: 7px; }
+.pos-receipt-settings-details summary { color: #39744f; font-size: 9px; font-weight: 600; cursor: pointer; }
+.pos-receipt-settings-details img { display: block; width: min(100%, 240px); max-height: 180px; margin: 9px auto 0; object-fit: contain; }
 .pos-cart-items { display: grid; gap: 12px; min-height: 70px; padding: 14px 16px; border-bottom: 1px solid #eff2f0; }
 .pos-cart-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px 12px; }
 .pos-cart-row > div:first-child { display: flex; min-width: 0; flex-direction: column; gap: 4px; }

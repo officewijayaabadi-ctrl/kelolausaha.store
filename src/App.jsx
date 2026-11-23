@@ -1098,6 +1098,7 @@ function App() {
   const [workspaceName, setWorkspaceName] = useState('KelolaUsaha.store');
   const [workspaceUrl, setWorkspaceUrl] = useState('');
   const [accessDraft, setAccessDraft] = useState(null);
+  const [accessSaving, setAccessSaving] = useState(false);
   const [inviteRole, setInviteRole] = useState('SUPER ADMIN');
   const [inviteBranchId, setInviteBranchId] = useState('');
   const [inviteUrl, setInviteUrl] = useState('');
@@ -1948,7 +1949,8 @@ function App() {
     });
   };
 
-  const saveUserAccess = () => {
+  const saveUserAccess = async () => {
+    if (!accessDraft) return;
     if (activeUser.role !== 'OWNER' && ['OWNER', 'PLATFORM_OWNER'].includes(accessDraft.role)) {
       setNotice('Hanya Owner yang dapat mengubah akses akun Owner.');
       return;
@@ -1969,6 +1971,35 @@ function App() {
         permissions: businessPermissions.filter((permission) => !superAdminRestrictedPermissions.includes(permission)),
       }
       : { ...accessDraft, permissions: businessPermissions };
+    if (isAuthenticated && !demoMode) {
+      setAccessSaving(true);
+      try {
+        const response = await fetch(`/api/team/members/${encodeURIComponent(accessDraft.id)}/access`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            role: savedAccessDraft.role,
+            permissions: savedAccessDraft.permissions,
+            active: savedAccessDraft.active,
+          }),
+        });
+        if (!response.ok) throw new Error(await getApiError(response, 'Pengaturan akses tidak dapat disimpan.'));
+        const result = await response.json();
+        if (!result.user || result.user.id !== accessDraft.id) {
+          throw new Error('Server tidak mengembalikan data pengguna yang diperbarui.');
+        }
+        setUsers((current) => current.map((user) => (
+          user.id === result.user.id ? { ...user, ...result.user } : user
+        )));
+        setNotice(`Pengaturan akses ${result.user.name} berhasil disimpan.`);
+        setAccessDraft(null);
+      } catch (error) {
+        setNotice(error.message);
+      } finally {
+        setAccessSaving(false);
+      }
+      return;
+    }
     setUsers((current) => current.map((user) => (
       user.id === accessDraft.id ? savedAccessDraft : user
     )));
@@ -2387,6 +2418,52 @@ function App() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!isAuthenticated || demoMode) return undefined;
+    let cancelled = false;
+    const refreshSessionUser = async () => {
+      try {
+        const response = await fetch('/api/auth/session');
+        if (response.status === 401) return;
+        if (!response.ok) throw new Error(await getApiError(response, 'Peran akun tidak dapat diperbarui.'));
+        const result = await response.json();
+        if (!result.user) throw new Error('Data sesi terbaru tidak valid.');
+        if (cancelled || result.user.id !== activeUser.id) return;
+        const sessionUser = result.user;
+        setUsers((current) => current.map((user) => (
+          user.id === sessionUser.id
+            ? {
+              ...user,
+              ...sessionUser,
+              active: true,
+              permissions: filterPermissionsForBusiness(
+                Array.isArray(sessionUser.permissions)
+                  ? sessionUser.permissions
+                  : rolePermissions[sessionUser.role] ?? [],
+                businessType,
+                workspaceModules,
+              ),
+            }
+            : user
+        )));
+      } catch (error) {
+        if (!cancelled) setNotice(error.message);
+      }
+    };
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') refreshSessionUser();
+    };
+    const refreshTimer = window.setInterval(refreshSessionUser, 60000);
+    window.addEventListener('focus', refreshWhenVisible);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    return () => {
+      cancelled = true;
+      window.clearInterval(refreshTimer);
+      window.removeEventListener('focus', refreshWhenVisible);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+    };
+  }, [activeUser.id, businessType, demoMode, isAuthenticated, workspaceModules]);
 
   useEffect(() => {
     if (!accountMenuOpen && !accountProfileOpen) return undefined;
@@ -3525,6 +3602,15 @@ function App() {
               </section>
               <form className="pos-cart" onSubmit={savePosTransaction}>
                 <div className="table-heading"><div><h2>Transaksi baru</h2><p>{cart.length} jenis item</p></div><button className="text-button" onClick={() => setCart([])} type="button">Kosongkan</button></div>
+                <section className="pos-receipt-settings" aria-label="Pengaturan nota aktif">
+                  <div className="pos-receipt-settings-heading"><span>Nota aktif dari pengaturan Owner</span><strong>{receiptModes.find(({ id }) => id === receiptSettings.mode)?.name}</strong></div>
+                  <div className="pos-receipt-settings-accent"><i style={{ background: activeReceiptAccent.color }} />Aksen {activeReceiptAccent.name}</div>
+                  <small>{receiptSettings.storeAddress || 'Alamat usaha belum ditambahkan pada nota.'}</small>
+                  <details className="pos-receipt-settings-details">
+                    <summary>Lihat pratinjau nota</summary>
+                    <img alt={`Contoh nota ${businessTypes[businessType]?.label || 'usaha'}`} src={sampleReceiptImage} />
+                  </details>
+                </section>
                 <div className="pos-cart-items">
                   {cart.map((item) => <div className="pos-cart-row" key={item.id}>
                     <div><strong>{item.name}</strong><small>{rupiah(item.price)} / {item.unit}</small></div>
@@ -3796,7 +3882,7 @@ function App() {
                   <td><span className={`role-badge role-${user.role.toLowerCase().replaceAll(' ', '-')}`}>{user.role}</span></td>
                   <td><span className="permission-count">{user.permissions.length} modul diizinkan</span></td>
                   <td><span className={`user-status ${user.active ? 'enabled' : 'disabled'}`}><span />{user.approvalStatus === 'pending' ? 'Menunggu persetujuan' : user.active ? 'Aktif' : 'Nonaktif'}</span></td>
-                  <td>{(activeUser.role === 'OWNER' || !['OWNER', 'PLATFORM_OWNER'].includes(user.role)) && <button aria-label={`Atur akses ${user.name}`} className="button button-quiet access-edit-button" onClick={() => editUserAccess(user)} type="button">Atur akses</button>}</td>
+                  <td>{user.id !== activeUser.id && !['OWNER', 'PLATFORM_OWNER'].includes(user.role) && <button aria-label={`Atur akses ${user.name}`} className="button button-quiet access-edit-button" onClick={() => editUserAccess(user)} type="button">Atur akses</button>}</td>
                 </tr>)}
               </tbody></table></div>
             </section>
@@ -3807,7 +3893,15 @@ function App() {
                 <div className="access-modal-header"><div><div className="eyebrow">PENGATURAN PENGGUNA</div><h2 id="access-modal-title">Atur akses pengguna</h2><p>{accessDraft.name} · {accessDraft.email}</p></div><button aria-label="Tutup pengaturan akses" className="modal-close" onClick={() => setAccessDraft(null)} type="button">×</button></div>
                 <div className="access-modal-body">
                   <div className="access-user-settings">
-                    <label className="field"><span>Peran pengguna</span><select onChange={(event) => setAccessDraft((current) => ({ ...current, role: event.target.value }))} value={accessDraft.role}>{(activeUser.role === 'OWNER' ? ['SUPER ADMIN', 'HRD', 'SVP', 'SPV', 'KEPALA TOKO', 'ADMIN', 'SALES', 'KASIR', 'DRIVER'] : ['HRD', 'SVP', 'SPV', 'KEPALA TOKO', 'ADMIN', 'SALES', 'KASIR', 'DRIVER', ...(accessDraft.role === 'SUPER ADMIN' ? ['SUPER ADMIN'] : [])]).map((item) => <option key={item}>{item}</option>)}</select></label>
+                    <label className="field"><span>Peran pengguna</span><select onChange={(event) => setAccessDraft((current) => ({
+                      ...current,
+                      role: event.target.value,
+                      permissions: filterPermissionsForBusiness(
+                        rolePermissions[event.target.value] || [],
+                        businessType,
+                        workspaceModules,
+                      ),
+                    }))} value={accessDraft.role}>{(activeUser.role === 'OWNER' ? ['SUPER ADMIN', 'HRD', 'SVP', 'SPV', 'KEPALA TOKO', 'ADMIN', 'SALES', 'KASIR', 'DRIVER'] : ['HRD', 'SVP', 'SPV', 'KEPALA TOKO', 'ADMIN', 'SALES', 'KASIR', 'DRIVER', ...(accessDraft.role === 'SUPER ADMIN' ? ['SUPER ADMIN'] : [])]).map((item) => <option key={item}>{item}</option>)}</select></label>
                     <label className="access-active-control"><span><strong>Akun aktif</strong><small>Pengguna dapat mengakses sistem</small></span><input checked={accessDraft.active} onChange={(event) => setAccessDraft((current) => ({ ...current, active: event.target.checked }))} type="checkbox" /><span className="switch-track" /></label>
                   </div>
                   <div className="permission-heading"><div><h3>Hak akses individual</h3><p>Hanya menampilkan hak akses yang sesuai dengan modul aktif pada usaha {businessTypes[businessType]?.label || 'ini'}.</p></div><button className="reset-permissions" onClick={() => setAccessDraft((current) => ({
@@ -3820,7 +3914,7 @@ function App() {
                     <span className="switch-track" />
                   </label>)}</div>
                 </div>
-                <div className="access-modal-footer"><button className="button button-quiet" onClick={() => setAccessDraft(null)} type="button">Batal</button><button className="button button-primary" onClick={saveUserAccess} type="button">Simpan perubahan</button></div>
+                <div className="access-modal-footer"><button className="button button-quiet" disabled={accessSaving} onClick={() => setAccessDraft(null)} type="button">Batal</button><button className="button button-primary" disabled={accessSaving} onClick={saveUserAccess} type="button">{accessSaving ? 'Menyimpan…' : 'Simpan perubahan'}</button></div>
               </section>
             </div>}
           </section>

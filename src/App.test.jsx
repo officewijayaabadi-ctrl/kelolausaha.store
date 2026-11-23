@@ -165,6 +165,176 @@ test('opens the receipt studio for Owner and Super Admin and saves workspace pre
   expect(await screen.findByRole('heading', { name: 'Studio Nota' })).toBeDefined();
 });
 
+test('loads the Owner receipt settings in a cashier workspace without giving the cashier setup access', async () => {
+  let sessionRole = 'SALES';
+  const fetchMock = vi.fn(async (url) => {
+    if (url === '/api/auth/session') {
+      return {
+        ok: true,
+        json: async () => ({
+          user: {
+            id: 'laundry-cashier',
+            name: 'Ayu Kasir',
+            email: 'kasir@laundry.test',
+            role: sessionRole,
+            permissions: sessionRole === 'KASIR'
+              ? ['dashboard', 'posAccess', 'priceManage', 'transactionsView', 'receiptsView', 'attendanceView']
+              : ['dashboard', 'customerManage', 'attendanceView'],
+          },
+          business: {
+            id: 'laundry-business',
+            name: 'LONDRI BERKAH ABADI',
+            type: 'laundry',
+            modules: ['dashboard', 'products', 'prices', 'pos', 'transactions', 'digital_receipts', 'customers', 'employees'],
+          },
+        }),
+      };
+    }
+    if (url === '/api/operations/dashboard') {
+      return { ok: true, json: async () => ({}) };
+    }
+    if (url === '/api/workspace/theme') {
+      return {
+        ok: true,
+        json: async () => ({
+          businessType: 'laundry',
+          themeSettings: {
+            receiptSettings: {
+              mode: 'thermal',
+              accent: 'emerald',
+              storeAddress: 'Jl. Melati No. 18',
+              footerNote: 'Terima kasih sudah mencuci di sini.',
+            },
+          },
+        }),
+      };
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  vi.stubGlobal('fetch', fetchMock);
+
+  render(<App />);
+
+  expect(await screen.findByText('SALES')).toBeDefined();
+  expect(screen.queryByRole('button', { name: 'Kasir' })).toBeNull();
+  sessionRole = 'KASIR';
+  fireEvent.focus(window);
+  expect(await screen.findByText('KASIR')).toBeDefined();
+  fireEvent.click(screen.getByRole('button', { name: /Kasir Laundry/ }));
+  expect(await screen.findByRole('heading', { name: 'Kasir' })).toBeDefined();
+  expect(await screen.findByRole('region', { name: 'Pengaturan nota aktif' })).toBeDefined();
+  expect(screen.getByText('Struk Thermal 58/80mm')).toBeDefined();
+  expect(screen.getByText('Jl. Melati No. 18')).toBeDefined();
+  expect(screen.queryByRole('button', { name: 'Pengaturan Nota' })).toBeNull();
+  expect(fetchMock).toHaveBeenCalledWith('/api/workspace/theme');
+});
+
+test('persists an Owner role change from Sales to Cashier with the Cashier default permissions', async () => {
+  const ownerId = '123e4567-e89b-12d3-a456-426614174001';
+  const employeeId = '123e4567-e89b-12d3-a456-426614174002';
+  const laundryModules = [
+    'dashboard', 'products', 'prices', 'pos', 'transactions', 'digital_receipts',
+    'customers', 'laundry_orders', 'inventory', 'employees',
+  ];
+  const employee = {
+    id: employeeId,
+    name: 'Aditia',
+    email: 'aditia@laundry.test',
+    role: 'SALES',
+    permissions: ['dashboard', 'spkCreate', 'spkViewOwn', 'customerManage', 'attendanceView'],
+    active: true,
+    approvalStatus: 'approved',
+  };
+  const fetchMock = vi.fn(async (url, options = {}) => {
+    if (url === '/api/auth/session') {
+      return {
+        ok: true,
+        json: async () => ({
+          user: {
+            id: ownerId,
+            name: 'Owner Laundry',
+            email: 'owner@laundry.test',
+            role: 'OWNER',
+            permissions: ['dashboard', 'accessManage', 'themeManage', 'userManage'],
+          },
+          business: {
+            id: '123e4567-e89b-12d3-a456-426614174003',
+            name: 'LONDRI BERKAH ABADI',
+            type: 'laundry',
+            modules: laundryModules,
+          },
+        }),
+      };
+    }
+    if (url === '/api/operations/dashboard') {
+      return { ok: true, json: async () => ({}) };
+    }
+    if (url === '/api/team/members' && options.method !== 'PATCH') {
+      return {
+        ok: true,
+        json: async () => ({
+          users: [{
+            id: ownerId,
+            name: 'Owner Laundry',
+            email: 'owner@laundry.test',
+            role: 'OWNER',
+            permissions: ['dashboard', 'accessManage', 'themeManage', 'userManage'],
+            active: true,
+          }, employee],
+        }),
+      };
+    }
+    if (url === '/api/billing/status') {
+      return {
+        ok: true,
+        json: async () => ({
+          business: {
+            name: 'LONDRI BERKAH ABADI',
+            type: 'laundry',
+            modules: laundryModules,
+            themeSettings: {},
+            subscription: { status: 'active' },
+          },
+          notifications: [],
+        }),
+      };
+    }
+    if (url === '/api/finance/entries') {
+      return { ok: true, json: async () => ({ entries: [] }) };
+    }
+    if (url === '/api/workspace/operations/branches') {
+      return { ok: true, json: async () => ({ branches: [] }) };
+    }
+    if (url === `/api/team/members/${employeeId}/access` && options.method === 'PATCH') {
+      const body = JSON.parse(options.body);
+      return { ok: true, json: async () => ({ user: { ...employee, ...body } }) };
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  vi.stubGlobal('fetch', fetchMock);
+
+  render(<App />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Pengelolaan Akses' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Atur akses Aditia' }));
+  fireEvent.change(screen.getByRole('combobox', { name: 'Peran pengguna' }), {
+    target: { value: 'KASIR' },
+  });
+  expect(screen.getByRole('checkbox', { name: /Kasir \/ POS/ }).checked).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: /Simpan perubahan/ }));
+
+  await waitFor(() => expect(screen.getByText('KASIR')).toBeDefined());
+  const updateCall = fetchMock.mock.calls.find(([url, options]) => (
+    url === `/api/team/members/${employeeId}/access` && options?.method === 'PATCH'
+  ));
+  expect(updateCall).toBeDefined();
+  expect(JSON.parse(updateCall[1].body)).toMatchObject({
+    role: 'KASIR',
+    active: true,
+    permissions: expect.arrayContaining(['posAccess', 'priceManage', 'transactionsView', 'receiptsView']),
+  });
+  expect(JSON.parse(updateCall[1].body).permissions).not.toContain('spkCreate');
+});
+
 test('shows tenant summaries only after platform-owner authentication', async () => {
   const fetchMock = vi.fn()
     .mockResolvedValueOnce({ ok: false, status: 401, json: async () => ({ message: 'Silakan masuk kembali.' }) })

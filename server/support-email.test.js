@@ -67,6 +67,58 @@ test('does not mark an email reply forwarded when delivery fails', async () => {
   expect(pool.query.mock.calls.some(([query]) => query.includes('email_forwarded_at = now()'))).toBe(false);
 });
 
+test('imports a sent-folder reply as an outbound owner message without sending it again', async () => {
+  const pool = createPool();
+  const sendEmail = vi.fn();
+
+  await processInboundSupportEmail({
+    mailboxUser: 'kelolausaha.store@gmail.com',
+    mailboxKind: 'sent',
+    mailboxPath: '[Gmail]/Sent Mail',
+    message: {
+      ...ownerReply,
+      to: { value: [{ address: ticket.requester_email }] },
+    },
+    pool,
+    sendEmail,
+    supportEmail: 'kelolausaha.store@gmail.com',
+    uid: 15,
+  });
+
+  const insertCall = pool.query.mock.calls.find(([query]) => query.includes('INSERT INTO support_messages'));
+  expect(insertCall[1]).toEqual([
+    ticket.id,
+    'owner',
+    'Tim Support',
+    'kelolausaha.store@gmail.com',
+    ownerReply.text,
+    ownerReply.messageId,
+    'outbound',
+  ]);
+  expect(sendEmail).not.toHaveBeenCalled();
+  expect(pool.query.mock.calls.some(([query]) => query.includes('email_forwarded_at = now()'))).toBe(false);
+});
+
+test('ignores a sent-folder support email that was not addressed to the ticket requester', async () => {
+  const pool = createPool();
+
+  await processInboundSupportEmail({
+    mailboxUser: 'kelolausaha.store@gmail.com',
+    mailboxKind: 'sent',
+    mailboxPath: '[Gmail]/Sent Mail',
+    message: {
+      ...ownerReply,
+      to: { value: [{ address: 'kelolausaha.store@gmail.com' }] },
+    },
+    pool,
+    sendEmail: vi.fn(),
+    supportEmail: 'kelolausaha.store@gmail.com',
+    uid: 16,
+  });
+
+  expect(pool.query.mock.calls.some(([query]) => query.includes('INSERT INTO support_messages'))).toBe(false);
+});
+
 test('ignores the original support notification sent to the support inbox', async () => {
   const pool = createPool();
   const sendEmail = vi.fn();
