@@ -133,6 +133,10 @@ function configuredSmtpUser() {
   return String(process.env.SMTP_USER || process.env.IMAP_USER || process.env.SMTP_FROM || '').trim();
 }
 
+function configuredSupportEmail() {
+  return String(process.env.SUPPORT_EMAIL || 'kelolausaha.store@gmail.com').trim();
+}
+
 function constantTimeEqual(left, right) {
   const leftBuffer = Buffer.from(left);
   const rightBuffer = Buffer.from(right);
@@ -289,7 +293,8 @@ async function sendSupportEmail({ to, subject, text, ticketNumber }) {
     auth: { user: smtpUser, pass: process.env.SMTP_PASSWORD },
   });
   return transport.sendMail({
-    from: process.env.SMTP_FROM || smtpUser,
+    from: configuredSupportEmail(),
+    replyTo: configuredSupportEmail(),
     to,
     subject: `[${ticketNumber}] ${subject}`,
     text,
@@ -297,7 +302,7 @@ async function sendSupportEmail({ to, subject, text, ticketNumber }) {
 }
 
 async function ingestGmailReplies() {
-  const user = process.env.IMAP_USER || configuredSmtpUser();
+  const user = process.env.IMAP_USER || configuredSupportEmail();
   const password = process.env.IMAP_PASSWORD || process.env.SMTP_PASSWORD;
   if (!user || !password) return;
 
@@ -334,7 +339,7 @@ async function ingestGmailReplies() {
 
         const senderEmail = parsed.from?.value?.[0]?.address?.toLowerCase()
           || String(process.env.PLATFORM_OWNER_EMAIL || '').toLowerCase();
-        const ownerEmail = String(process.env.PLATFORM_OWNER_EMAIL || configuredSmtpUser()).toLowerCase();
+        const ownerEmail = configuredSupportEmail().toLowerCase();
         const senderType = senderEmail === ownerEmail ? 'owner' : 'user';
         const body = String(parsed.text || parsed.html || '').trim().slice(0, 5000);
         if (body) {
@@ -1381,7 +1386,7 @@ app.post('/api/billing/notifications/:id/read', authenticate, requireTenant, asy
 });
 
 app.get('/api/support/contact', (_req, res) => {
-  const email = String(process.env.PLATFORM_OWNER_EMAIL || configuredSmtpUser()).trim();
+  const email = configuredSupportEmail();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return res.status(503).json({ message: 'Email tim support belum dikonfigurasi.' });
   }
@@ -1411,7 +1416,7 @@ app.post('/api/support/tickets', async (req, res, next) => {
       [ticket.id, requesterName, requesterEmail, message],
     );
     await sendSupportEmail({
-      to: process.env.PLATFORM_OWNER_EMAIL || configuredSmtpUser(),
+      to: configuredSupportEmail(),
       subject,
       ticketNumber,
       text: `Pesan baru dari ${requesterName} (${requesterEmail})\n\n${message}\n\nNomor tiket: ${ticketNumber}`,
@@ -1479,7 +1484,7 @@ app.post('/api/support/tickets/:ticketId/messages', async (req, res, next) => {
       [ticket.id],
     );
     await sendSupportEmail({
-      to: process.env.PLATFORM_OWNER_EMAIL || configuredSmtpUser(),
+      to: configuredSupportEmail(),
       subject: ticket.subject,
       ticketNumber: ticket.ticket_number,
       text: `Pesan lanjutan dari ${ticket.requester_name} (${email})\n\n${body}\n\nNomor tiket: ${ticket.ticket_number}`,

@@ -125,10 +125,9 @@ function PhotoField({ label, onChange, required = true }) {
   </label>;
 }
 
-function LiveCameraField({ label, onChange, photo }) {
+function LiveCameraField({ label, onCapture, busy }) {
   const videoRef = useRef(null);
   const [stream, setStream] = useState(null);
-  const [previewUrl, setPreviewUrl] = useState('');
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraError, setCameraError] = useState('');
 
@@ -141,16 +140,6 @@ function LiveCameraField({ label, onChange, photo }) {
       if (video) video.srcObject = null;
     };
   }, [stream]);
-
-  useEffect(() => {
-    if (!photo) {
-      setPreviewUrl('');
-      return undefined;
-    }
-    const url = URL.createObjectURL(photo);
-    setPreviewUrl(url);
-    return () => URL.revokeObjectURL(url);
-  }, [photo]);
 
   const startCamera = async () => {
     setCameraError('');
@@ -196,33 +185,27 @@ function LiveCameraField({ label, onChange, photo }) {
         setCameraError('Foto gagal diambil. Silakan coba kembali.');
         return;
       }
-      onChange(new File([blob], `absensi-${Date.now()}.jpg`, { type: 'image/jpeg' }));
       setStream(null);
       setCameraError('');
+      onCapture(new File([blob], `absensi-${Date.now()}.jpg`, { type: 'image/jpeg' }));
     }, 'image/jpeg', 0.9);
-  };
-
-  const retakePhoto = () => {
-    onChange(null);
-    setCameraError('');
-    startCamera();
   };
 
   return <div className="field attendance-photo-field">
     <span>{label} <b>*</b></span>
-    {photo && previewUrl
-      ? <div className="attendance-camera-preview">
-        <img alt={`${label} yang diambil`} src={previewUrl} />
-        <button className="button button-quiet" onClick={retakePhoto} type="button">Ambil ulang foto</button>
-      </div>
-      : stream
-        ? <div className="attendance-camera-preview">
-          <video autoPlay muted onCanPlay={() => setCameraReady(true)} playsInline ref={videoRef} />
-          <button className="button button-primary" disabled={!cameraReady} onClick={capturePhoto} type="button">Ambil foto</button>
-        </div>
-        : <button className="button button-quiet" onClick={startCamera} type="button">Buka kamera</button>}
+    {stream && <div className="attendance-camera-preview">
+      <video autoPlay muted onCanPlay={() => setCameraReady(true)} playsInline ref={videoRef} />
+    </div>}
+    <button
+      className="button button-primary"
+      disabled={busy || (Boolean(stream) && !cameraReady)}
+      onClick={stream ? capturePhoto : startCamera}
+      type="button"
+    >
+      {busy ? 'Mengirim absensi…' : stream ? 'Ambil foto & absen' : 'Mulai absensi'}
+    </button>
     {cameraError && <small className="attendance-camera-error" role="alert">{cameraError}</small>}
-    <small>Foto harus diambil langsung dari kamera. Foto diberi watermark waktu dan koordinat Google Maps sebelum disimpan.</small>
+    <small>Foto diambil langsung dari kamera, diberi watermark waktu dan lokasi, lalu langsung dikirim.</small>
   </div>;
 }
 
@@ -405,8 +388,6 @@ export function AttendanceWorkspace({ role, isAuthenticated }) {
     requestType: 'permission', startDate: new Date().toISOString().slice(0, 10),
     endDate: new Date().toISOString().slice(0, 10), reason: '',
   });
-  const [checkInPhoto, setCheckInPhoto] = useState(null);
-  const [checkOutPhoto, setCheckOutPhoto] = useState(null);
   const [requestPhoto, setRequestPhoto] = useState(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -466,13 +447,7 @@ export function AttendanceWorkspace({ role, isAuthenticated }) {
     if (isAuthenticated) loadReport();
   }, [canViewReport, isAuthenticated, reportDate, branchId]);
 
-  const submitAttendance = async (event, endpoint, photo, setPhoto) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    if (!photo) {
-      setError('Ambil foto langsung sebelum mengirim absensi.');
-      return;
-    }
+  const submitAttendance = async (endpoint, photo) => {
     setBusy(true);
     setError('');
     setMessage('');
@@ -484,8 +459,6 @@ export function AttendanceWorkspace({ role, isAuthenticated }) {
       formData.append('latitude', String(location.latitude));
       formData.append('longitude', String(location.longitude));
       await requestJson(`${operationsUrl}/attendance/${endpoint}`, { method: 'POST', body: formData });
-      setPhoto(null);
-      form.reset();
       setMessage(endpoint === 'check-in' ? 'Absensi masuk berhasil tersimpan.' : 'Absensi pulang berhasil tersimpan.');
       await loadToday();
     } catch (submitError) {
@@ -578,14 +551,14 @@ export function AttendanceWorkspace({ role, isAuthenticated }) {
     {error && <div className="notice error-notice" role="alert">{error}</div>}
 
     <section className="attendance-clock-grid">
-      <form className="table-card attendance-action-card" onSubmit={(event) => submitAttendance(event, 'check-in', checkInPhoto, setCheckInPhoto)}>
+      <section className="table-card attendance-action-card">
         <div className="table-heading"><div><h2>Absensi masuk</h2><p>{today?.attendance?.workDate || 'Hari ini'} · {settings.workStart}–{settings.workEnd}</p></div><span className={`attendance-status ${isClockedIn ? 'is-done' : ''}`}>{isClockedIn ? 'Tercatat' : 'Belum absen'}</span></div>
-        {isClockedIn ? <div className="attendance-record-preview"><strong>Sudah absen masuk · {new Date(today.attendance.checkInAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</strong><a href={today.attendance.checkInMapsUrl} rel="noreferrer" target="_blank">Lihat lokasi di Google Maps ↗</a></div> : <><LiveCameraField label="Foto selfie masuk" onChange={setCheckInPhoto} photo={checkInPhoto} /><button className="button button-primary" disabled={busy || !checkInPhoto} type="submit">{busy ? 'Menyimpan…' : 'Absen masuk dengan foto & lokasi'}</button></>}
-      </form>
-      <form className="table-card attendance-action-card" onSubmit={(event) => submitAttendance(event, 'check-out', checkOutPhoto, setCheckOutPhoto)}>
+        {isClockedIn ? <div className="attendance-record-preview"><strong>Sudah absen masuk · {new Date(today.attendance.checkInAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</strong><a href={today.attendance.checkInMapsUrl} rel="noreferrer" target="_blank">Lihat lokasi di Google Maps ↗</a></div> : <LiveCameraField busy={busy} label="Foto selfie masuk" onCapture={(photo) => submitAttendance('check-in', photo)} />}
+      </section>
+      <section className="table-card attendance-action-card">
         <div className="table-heading"><div><h2>Absensi pulang</h2><p>{isClockedIn ? 'Ambil foto dan tandai lokasi saat pulang.' : 'Selesaikan absensi masuk terlebih dahulu.'}</p></div><span className={`attendance-status ${isClockedOut ? 'is-done' : ''}`}>{isClockedOut ? 'Sudah absen pulang' : 'Belum absen'}</span></div>
-        {isClockedOut ? <div className="attendance-record-preview"><strong>Sudah absen pulang · {new Date(today.attendance.checkOutAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</strong><a href={today.attendance.checkOutMapsUrl} rel="noreferrer" target="_blank">Lihat lokasi di Google Maps ↗</a></div> : isClockedIn ? <><LiveCameraField label="Foto selfie pulang" onChange={setCheckOutPhoto} photo={checkOutPhoto} /><button className="button button-primary" disabled={busy || !checkOutPhoto} type="submit">{busy ? 'Menyimpan…' : 'Absen pulang dengan foto & lokasi'}</button></> : <p className="attendance-record-preview">Absen masuk dulu sebelum mengambil foto absensi pulang.</p>}
-      </form>
+        {isClockedOut ? <div className="attendance-record-preview"><strong>Sudah absen pulang · {new Date(today.attendance.checkOutAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</strong><a href={today.attendance.checkOutMapsUrl} rel="noreferrer" target="_blank">Lihat lokasi di Google Maps ↗</a></div> : isClockedIn ? <LiveCameraField busy={busy} label="Foto selfie pulang" onCapture={(photo) => submitAttendance('check-out', photo)} /> : <p className="attendance-record-preview">Absen masuk dulu sebelum mengambil foto absensi pulang.</p>}
+      </section>
     </section>
 
     <form className="table-card attendance-request-card" onSubmit={submitRequest}>

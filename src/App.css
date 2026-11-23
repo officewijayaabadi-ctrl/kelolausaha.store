@@ -53,14 +53,27 @@ button { cursor: pointer; }
 .nav-item.active .nav-icon { color: #d93645; }
 .nav-count { display: grid; width: 19px; height: 19px; margin-left: auto; place-items: center; border-radius: 50%; color: #b42332; background: #ffe5e8; font-size: 10px; font-weight: 700; }
 .sidebar-bottom { margin-top: auto; }
-.help-card { position: fixed; right: 20px; bottom: 20px; z-index: 20; display: flex; width: 210px; flex-direction: column; align-items: flex-start; margin: 0; padding: 14px 12px 12px; border: 1px solid #f2e4e6; border-radius: 9px; background: #fff8f8; box-shadow: 0 8px 24px #17241f1a; }
-.help-icon { display: grid; width: 20px; height: 20px; margin-bottom: 10px; place-items: center; border: 1px solid #edc7cb; border-radius: 50%; color: #bd2635; font-size: 12px; }
-.help-card strong { color: #343c46; font-size: 11px; }
-.help-card > span:not(.help-icon) { margin-top: 5px; color: #7d8792; font-size: 10px; }
-.help-card button { margin-top: 11px; padding: 0; border: 0; color: #c52f3e; background: none; font-size: 10px; font-weight: 600; }
-.help-card button span { margin-left: 4px; }
-.help-card-email { margin-top: 8px; color: #74817b; font-size: 10px; text-decoration: underline; }
-@media (max-width: 600px) { .help-card { right: 12px; bottom: 12px; width: min(210px, calc(100vw - 24px)); } }
+.support-floating { position: fixed; right: 20px; bottom: 20px; z-index: 20; display: grid; justify-items: end; gap: 10px; }
+.support-floating-pill { display: flex; width: 228px; min-height: 66px; align-items: center; gap: 10px; padding: 7px 12px 7px 7px; border: 1px solid #f1dfe2; border-radius: 999px; color: #343c46; background: #fff; box-shadow: 0 8px 26px #17241f24; text-align: left; transition: transform .18s ease, box-shadow .18s ease; }
+.support-floating-pill:hover { transform: translateY(-2px); box-shadow: 0 12px 30px #17241f2e; }
+.support-floating-pill:focus-visible { outline: 2px solid #bd2635; outline-offset: 3px; }
+.support-operator-avatar { display: grid; width: 50px; height: 50px; flex: 0 0 auto; place-items: center; border-radius: 50%; background: #fff0f2; animation: support-operator-float 2.8s ease-in-out infinite; }
+.support-operator-avatar svg { display: block; width: 46px; height: 46px; }
+.support-floating-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 4px; }
+.support-floating-copy strong { color: #343c46; font-size: 11px; }
+.support-floating-copy small { color: #7d8792; font-size: 10px; }
+.support-floating-chevron { display: grid; width: 25px; height: 25px; flex: 0 0 auto; place-items: center; border: 1px solid #f1d5d9; border-radius: 50%; color: #bd2635; background: #fff7f8; font-size: 15px; font-weight: 700; }
+.help-popover { position: relative; display: grid; width: min(270px, calc(100vw - 24px)); gap: 9px; padding: 17px; border: 1px solid #f1dfe2; border-radius: 14px; background: #fff; box-shadow: 0 12px 34px #17241f26; animation: support-popover-in .18s ease-out; }
+.help-popover > strong { padding-right: 20px; color: #343c46; font-size: 13px; }
+.help-popover p { color: #7d8792; font-size: 11px; line-height: 1.5; }
+.help-popover-close { position: absolute; top: 8px; right: 9px; display: grid; width: 26px; height: 26px; place-items: center; border: 0; border-radius: 50%; color: #74817b; background: #f5f7f6; font-size: 17px; }
+.help-popover-action { justify-self: start; padding: 8px 11px; border: 0; border-radius: 8px; color: #fff; background: #bd2635; font-size: 10px; font-weight: 600; }
+.help-popover-action:hover { background: #a9202e; }
+.help-popover-email { justify-self: start; color: #bd2635; font-size: 10px; font-weight: 600; text-decoration: underline; }
+@keyframes support-operator-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+@keyframes support-popover-in { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+@media (max-width: 600px) { .support-floating { right: 12px; bottom: 12px; } .support-floating-pill { width: min(228px, calc(100vw - 24px)); } }
+@media (prefers-reduced-motion: reduce) { .support-operator-avatar, .help-popover { animation: none; } .support-floating-pill { transition: none; } }
 .profile { display: flex; align-items: center; gap: 9px; padding: 13px 3px 0; border-top: 1px solid #eee7e8; }
 .avatar, .topbar-avatar { display: grid; flex: 0 0 auto; width: 33px; height: 33px; place-items: center; border-radius: 50%; color: #bd2635; background: #ffe9eb; font-size: 10px; font-weight: 700; }
 .profile-copy strong { overflow: hidden; color: #343c46; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }

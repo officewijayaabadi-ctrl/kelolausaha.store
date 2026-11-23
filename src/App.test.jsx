@@ -760,7 +760,7 @@ test('opens the floating support form and sends the signed-in user email to supp
   };
   const fetchMock = vi.fn(async (url, options = {}) => {
     if (url === '/api/support/contact') {
-      return { ok: true, json: async () => ({ email: 'owner@kelolausaha.store' }) };
+      return { ok: true, json: async () => ({ email: 'kelolausaha.store@gmail.com' }) };
     }
     if (url === '/api/support/tickets' && options.method === 'POST') {
       return { ok: true, json: async () => ({ ticket: { id: ticket.id } }) };
@@ -792,13 +792,14 @@ test('opens the floating support form and sends the signed-in user email to supp
     target: { value: 'user-2' },
   });
 
+  fireEvent.click(screen.getByRole('button', { name: 'Buka bantuan' }));
+  const directEmailLink = await screen.findByRole('link', { name: 'Email langsung ↗' });
+  expect(directEmailLink.getAttribute('href')).toBe('mailto:kelolausaha.store@gmail.com?subject=Bantuan%20KelolaUsaha.store');
   fireEvent.click(screen.getByRole('button', { name: 'Pusat bantuan' }));
 
   expect(await screen.findByRole('heading', { name: 'Pusat Bantuan KelolaUsaha' })).toBeDefined();
   expect(screen.getByRole('textbox', { name: 'Nama' }).value).toBe('Rika Wijaya');
   expect(screen.getByRole('textbox', { name: 'Email' }).value).toBe('rika@wam.co.id');
-  const directEmailLink = await screen.findByRole('link', { name: 'Email langsung ↗' });
-  expect(directEmailLink.getAttribute('href')).toBe('mailto:owner@kelolausaha.store?subject=Bantuan%20KelolaUsaha.store');
   fireEvent.change(screen.getByRole('textbox', { name: 'Pesan' }), {
     target: { value: 'Email bantuan belum masuk.' },
   });

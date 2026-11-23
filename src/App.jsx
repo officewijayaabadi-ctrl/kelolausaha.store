@@ -918,6 +918,7 @@ function App() {
   const [supportOwnerReply, setSupportOwnerReply] = useState('');
   const [supportOwnerStatus, setSupportOwnerStatus] = useState('waiting_user');
   const [supportContactEmail, setSupportContactEmail] = useState('');
+  const [helpOpen, setHelpOpen] = useState(false);
   const [supportBusy, setSupportBusy] = useState(false);
   const [supportError, setSupportError] = useState('');
   const [supportNotice, setSupportNotice] = useState('');
@@ -1954,6 +1955,7 @@ function App() {
     setSupportEmail(activeUser.email || '');
     setSupportError('');
     setSupportNotice('');
+    setHelpOpen(false);
     openPage('Pusat Bantuan');
   };
   const ownerTrialEnd = activeUser.role === 'OWNER'
@@ -2021,7 +2023,7 @@ function App() {
     : spks;
 
   useEffect(() => {
-    if (activePage !== 'Pusat Bantuan' || activeUser.role === 'PLATFORM_OWNER') return undefined;
+    if ((!helpOpen && activePage !== 'Pusat Bantuan') || activeUser.role === 'PLATFORM_OWNER') return undefined;
     let cancelled = false;
     fetch('/api/support/contact')
       .then(async (response) => {
@@ -2036,7 +2038,7 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [activePage, activeUser.role]);
+  }, [activePage, activeUser.role, helpOpen]);
 
   useEffect(() => {
     const pageIsAllowed = activePage === 'Dashboard'
@@ -3516,12 +3518,39 @@ function App() {
           </section>
         )}
       </main>
-      <aside aria-label="Pusat bantuan" className="help-card floating-help-card">
-        <span className="help-icon">?</span>
-        <strong>Butuh bantuan?</strong>
-        <span>Pesan terkirim ke tim support melalui email.</span>
-        <button type="button" onClick={openSupport}>Pusat bantuan <span aria-hidden="true">→</span></button>
-        {supportContactEmail && <a className="help-card-email" href={`mailto:${supportContactEmail}?subject=${encodeURIComponent('Bantuan KelolaUsaha.store')}`}>Email langsung ↗</a>}
+      <aside aria-label="Operator bantuan" className="support-floating">
+        {helpOpen && <div aria-label="Opsi bantuan" className="help-popover" id="help-popover" role="dialog">
+          <button aria-label="Tutup bantuan" className="help-popover-close" onClick={() => setHelpOpen(false)} type="button">×</button>
+          <strong>Butuh bantuan?</strong>
+          <p>Operator kami siap membantu. Pesan dikirim melalui email.</p>
+          <button className="help-popover-action" onClick={openSupport} type="button">Pusat bantuan <span aria-hidden="true">→</span></button>
+          {supportContactEmail && <a className="help-popover-email" href={`mailto:${supportContactEmail}?subject=${encodeURIComponent('Bantuan KelolaUsaha.store')}`}>Email langsung ↗</a>}
+        </div>}
+        <button
+          aria-controls="help-popover"
+          aria-expanded={helpOpen}
+          aria-label={helpOpen ? 'Tutup bantuan' : 'Buka bantuan'}
+          className="support-floating-pill"
+          onClick={() => setHelpOpen((current) => !current)}
+          type="button"
+        >
+          <span aria-hidden="true" className="support-operator-avatar">
+            <svg viewBox="0 0 48 48">
+              <circle cx="24" cy="24" fill="#fff0f2" r="23" />
+              <path d="M9 22a15 15 0 0 1 30 0v7h-5v-8a10 10 0 0 0-20 0v8H9z" fill="#bd2635" />
+              <path d="M14 21c1-8 5-12 11-12 5 0 9 3 11 9-3-1-6-3-8-6-3 4-7 7-14 9" fill="#51353a" />
+              <path d="M14 22c0-6 4-10 10-10s10 4 10 10v5c0 7-4 11-10 11s-10-4-10-11z" fill="#ffd7c7" />
+              <path d="M10 22a4 4 0 0 0-4 4v3a4 4 0 0 0 4 4h3V22zm28 0h-3v11h3a4 4 0 0 0 4-4v-3a4 4 0 0 0-4-4" fill="#e24b59" />
+              <circle cx="20" cy="25" fill="#4a3435" r="1.2" />
+              <circle cx="28" cy="25" fill="#4a3435" r="1.2" />
+              <path d="M21 30q3 2 6 0" fill="none" stroke="#a95058" strokeLinecap="round" strokeWidth="1.5" />
+              <path d="M39 32c0 4-3 5-6 5" fill="none" stroke="#bd2635" strokeLinecap="round" strokeWidth="2" />
+              <circle cx="32" cy="37" fill="#bd2635" r="1.7" />
+            </svg>
+          </span>
+          <span className="support-floating-copy"><strong>Operator bantuan</strong><small>Siap membantu</small></span>
+          <span aria-hidden="true" className="support-floating-chevron">{helpOpen ? '×' : '?'}</span>
+        </button>
       </aside>
       {accountProfileOpen && <div className="access-modal-backdrop" onMouseDown={(event) => {
         if (event.target === event.currentTarget) setAccountProfileOpen(false);
