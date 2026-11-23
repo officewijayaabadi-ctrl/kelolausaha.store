@@ -281,10 +281,11 @@ async function sendSupportEmail({ to, subject, text, ticketNumber }) {
   if (!process.env.SMTP_HOST || !smtpUser || !process.env.SMTP_PASSWORD) {
     throw new Error('SMTP belum dikonfigurasi untuk notifikasi bantuan.');
   }
+  const port = Number(process.env.SMTP_PORT) || 587;
   const transport = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT) || 587,
-    secure: process.env.SMTP_SECURE === 'true',
+    port,
+    secure: port === 465 || process.env.SMTP_SECURE === 'true',
     auth: { user: smtpUser, pass: process.env.SMTP_PASSWORD },
   });
   return transport.sendMail({
@@ -1377,6 +1378,14 @@ app.post('/api/billing/notifications/:id/read', authenticate, requireTenant, asy
   } catch (error) {
     next(error);
   }
+});
+
+app.get('/api/support/contact', (_req, res) => {
+  const email = String(process.env.PLATFORM_OWNER_EMAIL || configuredSmtpUser()).trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(503).json({ message: 'Email tim support belum dikonfigurasi.' });
+  }
+  res.json({ email });
 });
 
 app.post('/api/support/tickets', async (req, res, next) => {

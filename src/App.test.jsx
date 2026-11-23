@@ -748,3 +748,66 @@ test('opens a table QR as a public menu and stores the order with its automatic 
   expect(orders[0].specialNotes).toBe('Saus dipisah');
   expect(orders[0].paymentStatus).toBe('BELUM LUNAS');
 });
+
+test('opens the floating support form and sends the signed-in user email to support', async () => {
+  const ticket = {
+    id: 'ticket-1',
+    ticket_number: 'KU-1234ABCD',
+    requester_name: 'Rika Wijaya',
+    requester_email: 'rika@wam.co.id',
+    subject: 'Pertanyaan lainnya',
+    status: 'new',
+  };
+  const fetchMock = vi.fn(async (url, options = {}) => {
+    if (url === '/api/support/contact') {
+      return { ok: true, json: async () => ({ email: 'owner@kelolausaha.store' }) };
+    }
+    if (url === '/api/support/tickets' && options.method === 'POST') {
+      return { ok: true, json: async () => ({ ticket: { id: ticket.id } }) };
+    }
+    if (url.startsWith('/api/support/tickets?email=')) {
+      return { ok: true, json: async () => ({ tickets: [ticket] }) };
+    }
+    if (url.startsWith(`/api/support/tickets/${ticket.id}?email=`)) {
+      return {
+        ok: true,
+        json: async () => ({
+          ticket,
+          messages: [{
+            id: 'message-1',
+            sender_type: 'user',
+            sender_name: ticket.requester_name,
+            body: 'Email bantuan belum masuk.',
+            created_at: '2026-11-23T00:00:00.000Z',
+          }],
+        }),
+      };
+    }
+    return { ok: false, status: 401, json: async () => ({}) };
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  render(<App />);
+  openOwnerPreview();
+  fireEvent.change(screen.getByRole('combobox', { name: 'Pilih akun demo' }), {
+    target: { value: 'user-2' },
+  });
+
+  fireEvent.click(screen.getByRole('button', { name: 'Pusat bantuan' }));
+
+  expect(await screen.findByRole('heading', { name: 'Pusat Bantuan KelolaUsaha' })).toBeDefined();
+  expect(screen.getByRole('textbox', { name: 'Nama' }).value).toBe('Rika Wijaya');
+  expect(screen.getByRole('textbox', { name: 'Email' }).value).toBe('rika@wam.co.id');
+  const directEmailLink = await screen.findByRole('link', { name: 'Email langsung ↗' });
+  expect(directEmailLink.getAttribute('href')).toBe('mailto:owner@kelolausaha.store?subject=Bantuan%20KelolaUsaha.store');
+  fireEvent.change(screen.getByRole('textbox', { name: 'Pesan' }), {
+    target: { value: 'Email bantuan belum masuk.' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: /Kirim pesan/ }));
+
+  await waitFor(() => expect(fetchMock.mock.calls.some(([url, options]) => (
+    url === '/api/support/tickets'
+      && options.method === 'POST'
+      && JSON.parse(options.body).email === 'rika@wam.co.id'
+  ))).toBe(true));
+  expect(await screen.findByRole('status')).toBeDefined();
+});

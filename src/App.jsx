@@ -917,6 +917,7 @@ function App() {
   const [supportOwnerMessages, setSupportOwnerMessages] = useState([]);
   const [supportOwnerReply, setSupportOwnerReply] = useState('');
   const [supportOwnerStatus, setSupportOwnerStatus] = useState('waiting_user');
+  const [supportContactEmail, setSupportContactEmail] = useState('');
   const [supportBusy, setSupportBusy] = useState(false);
   const [supportError, setSupportError] = useState('');
   const [supportNotice, setSupportNotice] = useState('');
@@ -1948,6 +1949,13 @@ function App() {
 
   const activeUser = users.find((user) => user.id === activeUserId) ?? users[0];
   const role = activeUser.role;
+  const openSupport = () => {
+    setSupportName(activeUser.name || '');
+    setSupportEmail(activeUser.email || '');
+    setSupportError('');
+    setSupportNotice('');
+    openPage('Pusat Bantuan');
+  };
   const ownerTrialEnd = activeUser.role === 'OWNER'
     && billingData?.business?.subscription?.status === 'trial'
     ? billingData.business.subscription.trialEndsAt
@@ -2011,6 +2019,24 @@ function App() {
   const visibleSpks = activePage === 'Approval'
     ? spks.filter((item) => item.status === 'APPROVAL SVP')
     : spks;
+
+  useEffect(() => {
+    if (activePage !== 'Pusat Bantuan' || activeUser.role === 'PLATFORM_OWNER') return undefined;
+    let cancelled = false;
+    fetch('/api/support/contact')
+      .then(async (response) => {
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message || 'Email tim support tidak tersedia.');
+        if (!result.email) throw new Error('Email tim support belum dikonfigurasi.');
+        if (!cancelled) setSupportContactEmail(result.email);
+      })
+      .catch((error) => {
+        if (!cancelled) setSupportError(error.message);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activePage, activeUser.role]);
 
   useEffect(() => {
     const pageIsAllowed = activePage === 'Dashboard'
@@ -2654,12 +2680,6 @@ function App() {
 
         <div className="sidebar-bottom">
           <div className="sidebar-copyright">© 2026 KelolaUsaha.store · Demo 1 bulan</div>
-          <div className="help-card">
-            <span className="help-icon">?</span>
-            <strong>Butuh bantuan?</strong>
-            <span>Hubungi tim support WAM</span>
-            <button type="button" onClick={() => openPage('Pusat Bantuan')}>Pusat bantuan <span aria-hidden="true">→</span></button>
-          </div>
           <div className="profile">
             <div className="avatar">{initialsFor(activeUser.name)}</div>
             <div className="profile-copy"><strong>{activeUser.name}</strong><span>{role}</span></div>
@@ -3496,6 +3516,13 @@ function App() {
           </section>
         )}
       </main>
+      <aside aria-label="Pusat bantuan" className="help-card floating-help-card">
+        <span className="help-icon">?</span>
+        <strong>Butuh bantuan?</strong>
+        <span>Pesan terkirim ke tim support melalui email.</span>
+        <button type="button" onClick={openSupport}>Pusat bantuan <span aria-hidden="true">→</span></button>
+        {supportContactEmail && <a className="help-card-email" href={`mailto:${supportContactEmail}?subject=${encodeURIComponent('Bantuan KelolaUsaha.store')}`}>Email langsung ↗</a>}
+      </aside>
       {accountProfileOpen && <div className="access-modal-backdrop" onMouseDown={(event) => {
         if (event.target === event.currentTarget) setAccountProfileOpen(false);
       }}>
