@@ -185,6 +185,58 @@ test('restores a signed-in platform-owner session after returning from checkout'
   expect(screen.queryByRole('link', { name: 'Masuk' })).toBeNull();
 });
 
+test('opens account profile and logs out from the account menu', async () => {
+  const fetchMock = vi.fn(async (url) => {
+    if (url === '/api/auth/session') {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          user: {
+            id: 'platform-owner',
+            name: 'Owner Platform',
+            email: 'owner@kelolausaha.store',
+            role: 'PLATFORM_OWNER',
+          },
+        }),
+      };
+    }
+    if (url === '/api/platform/businesses') {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          businesses: [],
+          summary: { total: 0, trials: 0, active: 0, paidRevenue: 0 },
+        }),
+      };
+    }
+    if (url === '/api/platform/support/tickets') {
+      return { ok: true, json: async () => ({ tickets: [] }) };
+    }
+    if (url === '/api/auth/logout') {
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
+    }
+    return { ok: false, status: 404, json: async () => ({ message: 'Not found' }) };
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  render(<App />);
+
+  await screen.findByRole('heading', { name: 'Rekap semua usaha' });
+  fireEvent.click(screen.getByRole('button', { name: 'Menu akun' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Profil Saya' }));
+  const profile = await screen.findByRole('dialog', { name: 'Profil Saya' });
+  expect(profile.textContent).toContain('owner@kelolausaha.store');
+  expect(profile.textContent).toContain('PLATFORM OWNER');
+
+  fireEvent.click(screen.getByRole('button', { name: 'Tutup' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Menu akun' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Keluar' }));
+
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/auth/logout', { method: 'POST' }));
+  expect(await screen.findByRole('link', { name: 'Masuk' })).toBeDefined();
+});
+
 test('creates a sequential SPK draft for the selected date', () => {
   render(<App />);
   openOwnerPreview();

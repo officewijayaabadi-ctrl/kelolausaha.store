@@ -910,6 +910,10 @@ function App() {
   const [themeNotice, setThemeNotice] = useState('');
   const [themeError, setThemeError] = useState('');
   const [themeSaving, setThemeSaving] = useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [accountProfileOpen, setAccountProfileOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState('');
   const [businessProfile, setBusinessProfile] = useState({ name: '', address: '', logoUrl: '' });
   const [businessProfileLoading, setBusinessProfileLoading] = useState(false);
   const [businessProfileSaving, setBusinessProfileSaving] = useState(false);
@@ -2022,6 +2026,26 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (!accountMenuOpen && !accountProfileOpen) return undefined;
+    const closeOnEscape = (event) => {
+      if (event.key !== 'Escape') return;
+      setAccountMenuOpen(false);
+      setAccountProfileOpen(false);
+    };
+    const closeMenuOutside = (event) => {
+      if (event.target instanceof Element && !event.target.closest('.account-menu-shell')) {
+        setAccountMenuOpen(false);
+      }
+    };
+    document.addEventListener('keydown', closeOnEscape);
+    if (accountMenuOpen) document.addEventListener('pointerdown', closeMenuOutside);
+    return () => {
+      document.removeEventListener('keydown', closeOnEscape);
+      document.removeEventListener('pointerdown', closeMenuOutside);
+    };
+  }, [accountMenuOpen, accountProfileOpen]);
+
+  useEffect(() => {
     if (!isAuthenticated || demoMode || !['OWNER', 'SUPER ADMIN'].includes(activeUser.role)) return undefined;
     let cancelled = false;
     const loadTeamMembers = async () => {
@@ -2447,6 +2471,44 @@ function App() {
     }
   };
 
+  const logoutAccount = async () => {
+    setLogoutError('');
+    setLoggingOut(true);
+    try {
+      if (isAuthenticated) {
+        const response = await fetch('/api/auth/logout', { method: 'POST' });
+        if (!response.ok && response.status !== 401) {
+          throw new Error(await getApiError(response, 'Akun tidak dapat keluar.'));
+        }
+      }
+
+      setIsAuthenticated(false);
+      setNeedsBusinessSetup(false);
+      setDemoMode(false);
+      setUsers(initialUsers);
+      setActiveUserId('platform-owner-demo');
+      setActivePage('Semua Usaha');
+      setBillingData(null);
+      setPlatformData(null);
+      setWorkspaceName('KelolaUsaha.store');
+      setWorkspaceUrl('');
+      setSpks(initialSpks);
+      setDealerMotorUnits([]);
+      setDealerMotorMovements([]);
+      setWorkspaceBranches([]);
+      setBusinessProfile({ name: '', address: '', logoUrl: '' });
+      setAuthView(isTenantWorkspaceHost() ? 'login' : null);
+      setAccountMenuOpen(false);
+      setAccountProfileOpen(false);
+      setSessionMessage('');
+      window.history.replaceState(null, '', window.location.pathname);
+    } catch (error) {
+      setLogoutError(error.message);
+    } finally {
+      setLoggingOut(false);
+    }
+  };
+
   const publicMenuParams = new URLSearchParams(window.location.search);
   if (publicMenuParams.get('menu') === 'restaurant') {
     return <RestaurantCustomerMenu
@@ -2556,9 +2618,14 @@ function App() {
             <button type="button" onClick={() => openPage('Pusat Bantuan')}>Pusat bantuan <span aria-hidden="true">→</span></button>
           </div>
           <div className="profile">
-            <div className="avatar">AP</div>
+            <div className="avatar">{initialsFor(activeUser.name)}</div>
             <div className="profile-copy"><strong>{activeUser.name}</strong><span>{role}</span></div>
-            <button className="profile-menu" aria-label="Menu profil" type="button">···</button>
+            <button
+              aria-label="Buka profil akun"
+              className="profile-menu"
+              onClick={() => setAccountProfileOpen(true)}
+              type="button"
+            >Profil</button>
           </div>
         </div>
       </aside>
@@ -2594,7 +2661,36 @@ function App() {
             <button className="icon-button notification-button" aria-label={`Notifikasi${unreadBillingNotifications.length ? `, ${unreadBillingNotifications.length} belum dibaca` : ''}`} onClick={() => openPage(activeUser.role === 'PLATFORM_OWNER' ? 'Semua Usaha' : activeUser.role === 'OWNER' ? 'Aktivasi' : 'Dashboard')} type="button">
               ♧{unreadBillingNotifications.length > 0 && <span className="notification-dot" />}
             </button>
-            <div className="topbar-avatar">{activeUser.name.split(' ').map((part) => part[0]).slice(0, 2).join('')}</div>
+            <div className="account-menu-shell">
+              <button
+                aria-controls="account-menu"
+                aria-expanded={accountMenuOpen}
+                aria-haspopup="true"
+                aria-label="Menu akun"
+                className="account-menu-trigger"
+                onClick={() => {
+                  setLogoutError('');
+                  setAccountMenuOpen((open) => !open);
+                }}
+                type="button"
+              >
+                <span className="topbar-avatar">{initialsFor(activeUser.name)}</span>
+              </button>
+              {accountMenuOpen && <div className="account-menu" id="account-menu">
+                <div className="account-menu-summary">
+                  <strong>{activeUser.name}</strong>
+                  <span>{activeUser.email || role}</span>
+                </div>
+                <button className="account-menu-item" onClick={() => {
+                  setAccountMenuOpen(false);
+                  setAccountProfileOpen(true);
+                }} type="button">Profil Saya</button>
+                <button className="account-menu-item account-menu-logout" disabled={loggingOut} onClick={logoutAccount} type="button">
+                  {loggingOut ? 'Memproses…' : isAuthenticated ? 'Keluar' : 'Keluar dari demo'}
+                </button>
+                {logoutError && <p className="account-menu-error" role="alert">{logoutError}</p>}
+              </div>}
+            </div>
           </div>
         </header>
 
@@ -3344,6 +3440,37 @@ function App() {
           </section>
         )}
       </main>
+      {accountProfileOpen && <div className="access-modal-backdrop" onMouseDown={(event) => {
+        if (event.target === event.currentTarget) setAccountProfileOpen(false);
+      }}>
+        <section aria-labelledby="account-profile-title" aria-modal="true" className="access-modal account-profile-modal" role="dialog">
+          <div className="access-modal-header">
+            <div>
+              <div className="eyebrow">AKUN</div>
+              <h2 id="account-profile-title">Profil Saya</h2>
+              <p>Informasi akun yang sedang digunakan.</p>
+            </div>
+            <button aria-label="Tutup profil" className="modal-close" onClick={() => setAccountProfileOpen(false)} type="button">×</button>
+          </div>
+          <div className="access-modal-body">
+            <div className="account-profile-details">
+              <div><span>Nama</span><strong>{activeUser.name}</strong></div>
+              <div><span>Email</span><strong>{activeUser.email || 'Belum tersedia'}</strong></div>
+              <div><span>Peran</span><strong>{role.replaceAll('_', ' ')}</strong></div>
+              <div><span>Workspace</span><strong>{workspaceName}</strong></div>
+            </div>
+          </div>
+          <div className="access-modal-footer">
+            {['OWNER', 'SUPER ADMIN'].includes(activeUser.role)
+              && activeUser.permissions.includes('themeManage')
+              && <button className="button button-quiet" onClick={() => {
+                setAccountProfileOpen(false);
+                openPage('Profil Usaha');
+              }} type="button">Kelola Profil Usaha</button>}
+            <button className="button button-primary" onClick={() => setAccountProfileOpen(false)} type="button">Tutup</button>
+          </div>
+        </section>
+      </div>}
     </div>
   );
 }
