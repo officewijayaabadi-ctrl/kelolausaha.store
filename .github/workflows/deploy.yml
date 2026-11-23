@@ -500,6 +500,21 @@ jobs:
             systemctl restart kelolausaha
 
             echo "Verifying realtime support chat..."
+            socket_ready=0
+            for attempt in $(seq 1 30); do
+              if curl --silent --show-error --fail --max-time 2 \
+                "http://127.0.0.1:4000/api/socket.io/?EIO=4&transport=polling&t=deploy" \
+                | grep --quiet '"sid"'; then
+                socket_ready=1
+                break
+              fi
+              sleep 1
+            done
+            if [ "$socket_ready" -ne 1 ]; then
+              echo "Socket.IO API did not become ready after restart."
+              exit 1
+            fi
+
             node --input-type=module <<'JS'
             import { io } from 'socket.io-client';
 
