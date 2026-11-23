@@ -714,6 +714,11 @@ td .spk-id { color: #316d50; font-size: 9px; }
 .pos-quantity span { min-width: 13px; color: #52635a; font-size: 10px; text-align: center; }
 .pos-line-total { grid-column: 1 / -1; color: #42614c; font-size: 10px; text-align: right; }
 .pos-customer-fields { display: grid; gap: 12px; padding: 15px 16px; }
+.pos-qris-payment { display: flex; align-items: center; gap: 12px; margin: 0 16px 12px; padding: 10px; border: 1px solid #e8edea; border-radius: 7px; background: #f8fbf8; }
+.pos-qris-payment img { width: 112px; height: 112px; flex: 0 0 auto; object-fit: contain; border-radius: 5px; background: #fff; }
+.pos-qris-payment div { display: grid; gap: 5px; }
+.pos-qris-payment strong { color: #304237; font-size: 10px; }
+.pos-qris-payment small { color: #738178; font-size: 9px; line-height: 1.5; }
 .two-columns { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .pos-total-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px 0; color: #65756b; font-size: 10px; }
 .pos-total-row strong { color: #25392d; font-size: 13px; }
@@ -922,6 +927,8 @@ td .spk-id { color: #316d50; font-size: 9px; }
 .theme-color-fields > .field { grid-column: 1 / -1; }
 .theme-assets-card { margin-top: 0; }
 .theme-assets-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 0 16px 16px; }
+.qris-assets-grid { grid-template-columns: minmax(0, 1fr); }
+.qris-asset-preview { width: 70px; height: 70px; }
 .theme-upload { display: flex; min-width: 0; align-items: center; gap: 10px; padding: 11px; border: 1px dashed #d7e1d9; border-radius: 6px; background: #fbfcfb; cursor: pointer; }
 .theme-asset-preview { display: grid; width: 38px; height: 38px; flex: 0 0 auto; place-items: center; overflow: hidden; border: 1px solid #dfe9e1; border-radius: 8px; color: var(--theme-primary, #28734e); background: var(--theme-secondary, #edf7ef); font-size: 12px; font-weight: 800; }
 .theme-asset-preview img { width: 100%; height: 100%; object-fit: contain; }
@@ -964,6 +971,7 @@ td .spk-id { color: #316d50; font-size: 9px; }
 .app-shell[data-dashboard-mode="dark"] .spk-form,
 .app-shell[data-dashboard-mode="dark"] .pos-catalog,
 .app-shell[data-dashboard-mode="dark"] .pos-cart,
+.app-shell[data-dashboard-mode="dark"] .pos-qris-payment,
 .app-shell[data-dashboard-mode="dark"] .pos-receipt,
 .app-shell[data-dashboard-mode="dark"] .price-create-form { border-color: #29394a; background: #172432; }
 .app-shell[data-dashboard-mode="dark"] .page-heading h1,
@@ -975,6 +983,8 @@ td .spk-id { color: #316d50; font-size: 9px; }
 .app-shell[data-dashboard-mode="dark"] .theme-upload strong { color: #e6edf4; }
 .app-shell[data-dashboard-mode="dark"] td,
 .app-shell[data-dashboard-mode="dark"] .pos-cart-row > div:first-child strong { color: #c4d1dc; }
+.app-shell[data-dashboard-mode="dark"] .pos-qris-payment strong { color: #e6edf4; }
+.app-shell[data-dashboard-mode="dark"] .pos-qris-payment small { color: #a7b6c4; }
 .app-shell[data-dashboard-mode="dark"] thead,
 .app-shell[data-dashboard-mode="dark"] .theme-upload,
 .app-shell[data-dashboard-mode="dark"] .activation-footer { background: #1d2c3a; }

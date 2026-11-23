@@ -8,6 +8,7 @@ export function BusinessProfileSettings({
   notice,
   onProfileChange,
   onLogoUpload,
+  onQrisUpload,
   onSave,
 }) {
   const update = (event) => {
@@ -75,6 +76,26 @@ export function BusinessProfileSettings({
           </section>
           <section className="theme-settings-card theme-assets-card">
             <div className="table-heading">
+              <div><h2>QRIS usaha</h2><p>QRIS akan ditampilkan di kasir saat metode pembayaran QRIS dipilih. Gunakan PNG, JPG, atau WebP maksimal 2 MB.</p></div>
+            </div>
+            <div className="theme-assets-grid qris-assets-grid">
+              <label className="theme-upload">
+                <span className="theme-asset-preview qris-asset-preview">
+                  {profile.qrisUrl ? <img alt="Pratinjau QRIS usaha" src={profile.qrisUrl} /> : 'QR'}
+                </span>
+                <span><strong>Unggah QRIS</strong><small>Pastikan kode QR terbaca dengan jelas.</small></span>
+                <input
+                  accept="image/png,image/jpeg,image/webp"
+                  aria-label="QRIS usaha"
+                  disabled={!canEdit || uploading || saving}
+                  onChange={onQrisUpload}
+                  type="file"
+                />
+              </label>
+            </div>
+          </section>
+          <section className="theme-settings-card theme-assets-card">
+            <div className="table-heading">
               <div><h2>Logo usaha</h2><p>Gunakan PNG, JPG, WebP, atau ICO maksimal 2 MB.</p></div>
             </div>
             <div className="theme-assets-grid">
@@ -94,7 +115,7 @@ export function BusinessProfileSettings({
             </div>
           </section>
           <div className="theme-save-row">
-            <span>Nama, alamat, nomor HP, dan logo disimpan untuk usaha ini.</span>
+            <span>Nama, alamat, nomor HP, logo, dan QRIS disimpan untuk usaha ini.</span>
             <button className="button button-primary" disabled={!canEdit || saving || uploading} type="submit">
               {saving ? 'Menyimpan…' : 'Simpan profil'} <span>→</span>
             </button>

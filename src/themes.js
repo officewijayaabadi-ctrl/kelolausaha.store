@@ -20,6 +20,7 @@ export const defaultThemeSettings = {
   statCardStyle: 'shadow',
   logoUrl: '',
   faviconUrl: '',
+  qrisUrl: '',
 };
 
 export function normalizeThemeSettings(settings = {}) {

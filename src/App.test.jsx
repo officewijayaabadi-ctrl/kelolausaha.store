@@ -46,6 +46,23 @@ test('lets the owner open business profile management', async () => {
   expect(screen.getByLabelText('Logo usaha')).toBeDefined();
 });
 
+test('shows the business QRIS in the cashier when QRIS is selected', async () => {
+  localStorage.setItem('ku-demo-theme:dealer_motor', JSON.stringify({
+    qrisUrl: '/uploads/company/qris.png',
+  }));
+  render(<App />);
+  openOwnerPreview();
+  fireEvent.change(screen.getByRole('combobox', { name: 'Pilih akun demo' }), {
+    target: { value: 'user-2' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Kasir' }));
+  fireEvent.change(screen.getByLabelText('Metode pembayaran'), { target: { value: 'QRIS' } });
+
+  const qrisImage = await screen.findByRole('img', { name: 'QRIS pembayaran KelolaUsaha.store' });
+  expect(qrisImage.getAttribute('src'))
+    .toBe('/uploads/company/qris.png');
+});
+
 test('lets the Super Admin open business profile management', async () => {
   render(<App />);
   openOwnerPreview();

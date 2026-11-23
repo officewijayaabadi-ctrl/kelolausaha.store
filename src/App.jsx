@@ -935,7 +935,7 @@ function App() {
   const [accountProfileOpen, setAccountProfileOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [logoutError, setLogoutError] = useState('');
-  const [businessProfile, setBusinessProfile] = useState({ name: '', address: '', phone: '', logoUrl: '' });
+  const [businessProfile, setBusinessProfile] = useState({ name: '', address: '', phone: '', logoUrl: '', qrisUrl: '' });
   const [businessProfileLoading, setBusinessProfileLoading] = useState(false);
   const [businessProfileSaving, setBusinessProfileSaving] = useState(false);
   const [businessProfileUploading, setBusinessProfileUploading] = useState(false);
@@ -1874,6 +1874,9 @@ function App() {
       logoUrl: typeof result.business?.themeSettings?.logoUrl === 'string'
         ? result.business.themeSettings.logoUrl
         : '',
+      qrisUrl: typeof result.business?.themeSettings?.qrisUrl === 'string'
+        ? result.business.themeSettings.qrisUrl
+        : '',
     });
     setWorkspaceUrl(targetWorkspaceUrl || '');
     setRestaurantOrderWorkspaceKey(orderWorkspaceKey);
@@ -2247,8 +2250,9 @@ function App() {
             ? {
               ...savedProfile,
               phone: typeof savedProfile.phone === 'string' ? savedProfile.phone : '',
+              qrisUrl: typeof savedProfile.qrisUrl === 'string' ? savedProfile.qrisUrl : '',
             }
-            : { name: dealerName, address: '', phone: '', logoUrl: '' });
+            : { name: dealerName, address: '', phone: '', logoUrl: '', qrisUrl: '' });
         } catch (error) {
           setBusinessProfileError(`Profil demo tidak dapat dimuat: ${error.message}`);
         }
@@ -2265,13 +2269,13 @@ function App() {
         const profile = result.profile;
         if (!profile || typeof profile.name !== 'string'
           || typeof profile.address !== 'string' || typeof profile.phone !== 'string'
-          || typeof profile.logoUrl !== 'string') {
+          || typeof profile.logoUrl !== 'string' || typeof profile.qrisUrl !== 'string') {
           throw new Error('Data profil usaha dari server tidak valid.');
         }
         if (cancelled) return;
         setBusinessProfile(profile);
         setWorkspaceName(profile.name);
-        setThemeSettings((current) => ({ ...current, logoUrl: profile.logoUrl }));
+        setThemeSettings((current) => ({ ...current, logoUrl: profile.logoUrl, qrisUrl: profile.qrisUrl }));
       } catch (error) {
         if (!cancelled) setBusinessProfileError(error.message);
       } finally {
@@ -2451,10 +2455,15 @@ function App() {
     if (!file) return;
     setUploadError('');
     const extension = file.name.split('.').pop().toLowerCase();
-    if ((!['image/png', 'image/jpeg', 'image/webp', 'image/x-icon'].includes(file.type)
-      && !['png', 'jpg', 'jpeg', 'webp', 'ico'].includes(extension))
+    const acceptedTypes = assetType === 'qris'
+      ? ['image/png', 'image/jpeg', 'image/webp']
+      : ['image/png', 'image/jpeg', 'image/webp', 'image/x-icon'];
+    const acceptedExtensions = assetType === 'qris'
+      ? ['png', 'jpg', 'jpeg', 'webp']
+      : ['png', 'jpg', 'jpeg', 'webp', 'ico'];
+    if ((!acceptedTypes.includes(file.type) && !acceptedExtensions.includes(extension))
       || file.size > 2 * 1024 * 1024) {
-      setUploadError('Pilih PNG, JPG, WebP, atau ICO berukuran maksimal 2 MB.');
+      setUploadError(`Pilih ${assetType === 'qris' ? 'PNG, JPG, atau WebP' : 'PNG, JPG, WebP, atau ICO'} berukuran maksimal 2 MB.`);
       event.target.value = '';
       return;
     }
@@ -2466,7 +2475,8 @@ function App() {
         const response = await fetch('/api/workspace/assets', { method: 'POST', body: upload });
         if (!response.ok) throw new Error(await getApiError(response, 'File tidak dapat diunggah.'));
         const result = await response.json();
-        setThemeSettings((current) => ({ ...current, [assetType === 'logo' ? 'logoUrl' : 'faviconUrl']: result.url }));
+        const themeAssetKey = assetType === 'logo' ? 'logoUrl' : assetType === 'qris' ? 'qrisUrl' : 'faviconUrl';
+        setThemeSettings((current) => ({ ...current, [themeAssetKey]: result.url }));
         onUploaded?.(result.url);
       } catch (error) {
         setUploadError(error.message);
@@ -2478,7 +2488,7 @@ function App() {
       const url = String(reader.result);
       setThemeSettings((current) => ({
         ...current,
-        [assetType === 'logo' ? 'logoUrl' : 'faviconUrl']: url,
+        [assetType === 'logo' ? 'logoUrl' : assetType === 'qris' ? 'qrisUrl' : 'faviconUrl']: url,
       }));
       onUploaded?.(url);
     };
@@ -2505,6 +2515,25 @@ function App() {
     }
   };
 
+  const uploadBusinessQris = async (event) => {
+    setBusinessProfileError('');
+    setBusinessProfileNotice('');
+    setBusinessProfileUploading(true);
+    try {
+      await changeThemeAsset(
+        event,
+        'qris',
+        (qrisUrl) => {
+          setBusinessProfile((current) => ({ ...current, qrisUrl }));
+          setBusinessProfileNotice('QRIS diunggah. Simpan profil untuk menerapkan perubahan.');
+        },
+        setBusinessProfileError,
+      );
+    } finally {
+      setBusinessProfileUploading(false);
+    }
+  };
+
   const saveBusinessProfile = async (event) => {
     event.preventDefault();
     setBusinessProfileError('');
@@ -2514,6 +2543,7 @@ function App() {
       address: businessProfile.address.trim(),
       phone: businessProfile.phone.trim(),
       logoUrl: businessProfile.logoUrl,
+      qrisUrl: businessProfile.qrisUrl,
     };
 
     if (!isAuthenticated) {
@@ -2543,12 +2573,16 @@ function App() {
       if (!response.ok) throw new Error(result.message || 'Profil usaha tidak dapat disimpan.');
       if (!result.profile || typeof result.profile.name !== 'string'
         || typeof result.profile.address !== 'string' || typeof result.profile.phone !== 'string'
-        || typeof result.profile.logoUrl !== 'string') {
+        || typeof result.profile.logoUrl !== 'string' || typeof result.profile.qrisUrl !== 'string') {
         throw new Error('Data profil usaha dari server tidak valid.');
       }
       setBusinessProfile(result.profile);
       setWorkspaceName(result.profile.name);
-      setThemeSettings((current) => ({ ...current, logoUrl: result.profile.logoUrl }));
+      setThemeSettings((current) => ({
+        ...current,
+        logoUrl: result.profile.logoUrl,
+        qrisUrl: result.profile.qrisUrl,
+      }));
       setBillingData((current) => (current?.business
         ? {
           ...current,
@@ -2556,7 +2590,11 @@ function App() {
             ...current.business,
             name: result.profile.name,
             phone: result.profile.phone,
-            themeSettings: { ...current.business.themeSettings, logoUrl: result.profile.logoUrl },
+            themeSettings: {
+              ...current.business.themeSettings,
+              logoUrl: result.profile.logoUrl,
+              qrisUrl: result.profile.qrisUrl,
+            },
           },
         }
         : current));
@@ -2627,7 +2665,7 @@ function App() {
       setDealerMotorUnits([]);
       setDealerMotorMovements([]);
       setWorkspaceBranches([]);
-      setBusinessProfile({ name: '', address: '', logoUrl: '' });
+      setBusinessProfile({ name: '', address: '', logoUrl: '', qrisUrl: '' });
       setAuthView(isTenantWorkspaceHost() ? 'login' : null);
       setAccountMenuOpen(false);
       setAccountProfileOpen(false);
@@ -3014,6 +3052,7 @@ function App() {
             loading={businessProfileLoading}
             notice={businessProfileNotice}
             onLogoUpload={uploadBusinessLogo}
+            onQrisUpload={uploadBusinessQris}
             onProfileChange={setBusinessProfile}
             onSave={saveBusinessProfile}
             profile={businessProfile}
@@ -3176,6 +3215,9 @@ function App() {
                     <label className="field"><span>Jumlah dibayar</span><div className="input-prefix"><span>Rp</span><input aria-label="Jumlah dibayar" min="0" onChange={(event) => setPosAmountPaid(event.target.value)} placeholder="0" type="number" value={posAmountPaid} /></div></label>
                   </div>
                 </div>
+                {posPaymentMethod === 'QRIS' && (themeSettings.qrisUrl
+                  ? <div className="pos-qris-payment"><img alt={`QRIS pembayaran ${workspaceName}`} src={themeSettings.qrisUrl} /><div><strong>Scan QRIS {workspaceName}</strong><small>Pastikan jumlah pembayaran sesuai total transaksi {rupiah(cartTotal)}.</small></div></div>
+                  : <div className="notice" role="status">QRIS usaha belum diunggah. Minta Owner mengunggahnya melalui menu Profil Usaha.</div>)}
                 <div className="pos-total-row"><span>Total</span><strong>{rupiah(cartTotal)}</strong></div>
                 <div className="pos-total-row pos-change"><span>Kembalian</span><strong>{rupiah(changeDue)}</strong></div>
                 <button className="button button-primary pos-submit" disabled={!cart.length} type="submit">Simpan transaksi &amp; buat nota <span>→</span></button>

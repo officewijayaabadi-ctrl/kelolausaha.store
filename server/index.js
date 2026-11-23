@@ -901,7 +901,8 @@ app.get('/api/workspace/profile', authenticate, requireTenant, async (req, res, 
                 WHERE b.company_id = c.id AND b.is_primary = true
                 LIMIT 1
               ), '') AS address,
-              COALESCE(c.theme_settings ->> 'logoUrl', '') AS "logoUrl"
+              COALESCE(c.theme_settings ->> 'logoUrl', '') AS "logoUrl",
+              COALESCE(c.theme_settings ->> 'qrisUrl', '') AS "qrisUrl"
        FROM companies c
        WHERE c.id = $1`,
       [req.user.company_id],
@@ -918,13 +919,16 @@ app.put('/api/workspace/profile', authenticate, requireRole('SUPER ADMIN', 'OWNE
   const address = typeof req.body?.address === 'string' ? req.body.address.trim() : '';
   const phone = typeof req.body?.phone === 'string' ? req.body.phone.trim() : '';
   const logoUrl = typeof req.body?.logoUrl === 'string' ? req.body.logoUrl.trim() : '';
-  const validAsset = !logoUrl
-    || (logoUrl.length <= 500
-      && logoUrl.startsWith(`/uploads/${req.user.company_id}/`)
-      && !logoUrl.includes('..'));
+  const qrisUrl = typeof req.body?.qrisUrl === 'string' ? req.body.qrisUrl.trim() : null;
+  const validAsset = (value) => !value
+    || (value.length <= 500
+      && value.startsWith(`/uploads/${req.user.company_id}/`)
+      && !value.includes('..'));
   if (!name || name.length > 160 || !address || address.length > 500
-    || !/^[+()\d\s.-]{8,30}$/.test(phone) || !validAsset) {
-    return res.status(400).json({ message: 'Nama, alamat, nomor HP, atau logo usaha tidak valid.' });
+    || !/^[+()\d\s.-]{8,30}$/.test(phone) || !validAsset(logoUrl)
+    || (req.body?.qrisUrl !== undefined && qrisUrl === null)
+    || !validAsset(qrisUrl)) {
+    return res.status(400).json({ message: 'Nama, alamat, nomor HP, logo, atau QRIS usaha tidak valid.' });
   }
 
   const client = await pool.connect();
@@ -935,14 +939,15 @@ app.put('/api/workspace/profile', authenticate, requireRole('SUPER ADMIN', 'OWNE
        SET name = $1,
            phone = $2,
            theme_settings = jsonb_set(
-             COALESCE(theme_settings, '{}'::jsonb),
-             '{logoUrl}',
-             to_jsonb($3::text),
+             jsonb_set(COALESCE(theme_settings, '{}'::jsonb), '{logoUrl}', to_jsonb($3::text), true),
+             '{qrisUrl}',
+             to_jsonb(COALESCE($4::text, COALESCE(theme_settings ->> 'qrisUrl', ''))),
              true
            )
-       WHERE id = $4
-       RETURNING name, phone, theme_settings ->> 'logoUrl' AS "logoUrl"`,
-      [name, phone, logoUrl, req.user.company_id],
+       WHERE id = $5
+       RETURNING name, phone, theme_settings ->> 'logoUrl' AS "logoUrl",
+                 theme_settings ->> 'qrisUrl' AS "qrisUrl"`,
+      [name, phone, logoUrl, qrisUrl, req.user.company_id],
     );
     if (!company.rowCount) {
       await client.query('ROLLBACK');
@@ -967,6 +972,7 @@ app.put('/api/workspace/profile', authenticate, requireRole('SUPER ADMIN', 'OWNE
         name: company.rows[0].name,
         address: branch.rows[0].address,
         logoUrl: company.rows[0].logoUrl || '',
+        qrisUrl: company.rows[0].qrisUrl || '',
       },
     });
   } catch (error) {
@@ -988,9 +994,13 @@ app.put('/api/workspace/theme', authenticate, requireRole('SUPER ADMIN', 'OWNER'
     logoUrl,
     faviconUrl,
   } = req.body;
+  const qrisUrl = typeof req.body?.qrisUrl === 'string' ? req.body.qrisUrl.trim() : undefined;
+  const hasQrisUrl = Object.prototype.hasOwnProperty.call(req.body || {}, 'qrisUrl');
   const validColor = (value) => value === '' || /^#[0-9a-f]{6}$/i.test(value);
   const validAsset = (value) => !value
     || (value.startsWith(`/uploads/${req.user.company_id}/`) && !value.includes('..'));
+  const themeSettings = { themeId, customPrimary, customSecondary, mode, sidebarMode, statCardStyle, logoUrl, faviconUrl };
+  if (qrisUrl !== undefined) themeSettings.qrisUrl = qrisUrl;
   if (!themeIds.has(themeId)
     || !validColor(customPrimary)
     || !validColor(customSecondary)
@@ -998,13 +1008,17 @@ app.put('/api/workspace/theme', authenticate, requireRole('SUPER ADMIN', 'OWNER'
     || !['mini', 'wide'].includes(sidebarMode)
     || !['shadow', 'border', 'soft'].includes(statCardStyle)
     || !validAsset(logoUrl)
-    || !validAsset(faviconUrl)) {
+    || !validAsset(faviconUrl)
+    || (hasQrisUrl && qrisUrl === undefined)
+    || !validAsset(qrisUrl)) {
     return res.status(400).json({ message: 'Pengaturan tampilan tidak valid.' });
   }
-  const themeSettings = { themeId, customPrimary, customSecondary, mode, sidebarMode, statCardStyle, logoUrl, faviconUrl };
   try {
     const result = await pool.query(
-      `UPDATE companies SET theme_settings = $1 WHERE id = $2 RETURNING theme_settings`,
+      `UPDATE companies
+       SET theme_settings = COALESCE(theme_settings, '{}'::jsonb) || $1::jsonb
+       WHERE id = $2
+       RETURNING theme_settings`,
       [JSON.stringify(themeSettings), req.user.company_id],
     );
     if (!result.rowCount) return res.status(404).json({ message: 'Workspace tidak ditemukan.' });
@@ -1015,13 +1029,20 @@ app.put('/api/workspace/theme', authenticate, requireRole('SUPER ADMIN', 'OWNER'
 });
 
 app.post('/api/workspace/assets', authenticate, requireRole('SUPER ADMIN', 'OWNER'), requireTenant, upload.single('file'), async (req, res, next) => {
-  if (!req.file || !['logo', 'favicon'].includes(req.body.assetType)) {
-    return res.status(400).json({ message: 'Pilih file logo atau favicon yang valid.' });
+  if (!req.file || !['logo', 'favicon', 'qris'].includes(req.body.assetType)) {
+    return res.status(400).json({ message: 'Pilih file logo, favicon, atau QRIS yang valid.' });
   }
   try {
     const fileType = await fileTypeFromBuffer(req.file.buffer);
-    if (!fileType || !imageExtensions.has(fileType.ext)) {
-      return res.status(400).json({ message: 'Format gambar tidak didukung. Gunakan PNG, JPG, WebP, atau ICO.' });
+    const allowedExtensions = req.body.assetType === 'qris'
+      ? new Set(['png', 'jpg', 'webp'])
+      : imageExtensions;
+    if (!fileType || !allowedExtensions.has(fileType.ext)) {
+      return res.status(400).json({
+        message: req.body.assetType === 'qris'
+          ? 'Format QRIS tidak didukung. Gunakan PNG, JPG, atau WebP.'
+          : 'Format gambar tidak didukung. Gunakan PNG, JPG, WebP, atau ICO.',
+      });
     }
     const companyDirectory = resolve(uploadDirectory, req.user.company_id);
     await mkdir(companyDirectory, { recursive: true });
