@@ -32,7 +32,7 @@ export async function processInboundSupportEmail({
     const sentToRequester = message.to?.value?.some(
       (recipient) => recipient.address?.toLowerCase() === ticket.requester_email.toLowerCase(),
     );
-    if (!sentToRequester) return;
+    if (!sentToRequester && !isEmailReply) return;
   }
 
   const senderType = isSupportReply ? 'owner' : 'user';

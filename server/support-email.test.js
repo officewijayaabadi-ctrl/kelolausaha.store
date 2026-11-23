@@ -108,6 +108,9 @@ test('ignores a sent-folder support email that was not addressed to the ticket r
     mailboxPath: '[Gmail]/Sent Mail',
     message: {
       ...ownerReply,
+      subject: '[KU-1234ABCD] Pertanyaan tentang usaha',
+      inReplyTo: undefined,
+      references: undefined,
       to: { value: [{ address: 'kelolausaha.store@gmail.com' }] },
     },
     pool,
@@ -117,6 +120,28 @@ test('ignores a sent-folder support email that was not addressed to the ticket r
   });
 
   expect(pool.query.mock.calls.some(([query]) => query.includes('INSERT INTO support_messages'))).toBe(false);
+});
+
+test('imports a ticket-thread reply from Sent when the recipient address differs', async () => {
+  const pool = createPool();
+
+  await processInboundSupportEmail({
+    mailboxUser: 'kelolausaha.store@gmail.com',
+    mailboxKind: 'sent',
+    mailboxPath: '[Gmail]/Sent Mail',
+    message: {
+      ...ownerReply,
+      to: { value: [{ address: 'rani+support@example.com' }] },
+      inReplyTo: '<user-question@example.com>',
+      references: ['<user-question@example.com>'],
+    },
+    pool,
+    sendEmail: vi.fn(),
+    supportEmail: 'kelolausaha.store@gmail.com',
+    uid: 17,
+  });
+
+  expect(pool.query.mock.calls.some(([query]) => query.includes('INSERT INTO support_messages'))).toBe(true);
 });
 
 test('ignores the original support notification sent to the support inbox', async () => {
