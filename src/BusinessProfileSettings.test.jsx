@@ -9,6 +9,7 @@ test('renders editable business identity fields and forwards profile actions', (
   const profile = {
     name: 'Usaha Dealer',
     address: 'Jalan Merdeka 10',
+    phone: '08123456789',
     logoUrl: '/uploads/company/logo.png',
   };
 
@@ -29,6 +30,7 @@ test('renders editable business identity fields and forwards profile actions', (
 
   expect(screen.getByRole('textbox', { name: /Nama usaha/ }).value).toBe('Usaha Dealer');
   expect(screen.getByRole('textbox', { name: /Alamat usaha/ }).value).toBe('Jalan Merdeka 10');
+  expect(screen.getByRole('textbox', { name: /Nomor HP usaha/ }).value).toBe('08123456789');
   expect(screen.getByRole('img', { name: 'Pratinjau logo usaha' }).getAttribute('src'))
     .toBe('/uploads/company/logo.png');
 

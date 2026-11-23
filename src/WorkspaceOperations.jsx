@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { branchAddons } from '../shared/plans.js';
 
 const operationsUrl = '/api/workspace/operations';
@@ -81,12 +81,149 @@ function statusLabel(status) {
   })[status] || status;
 }
 
+function csvCell(value) {
+  const text = String(value ?? '');
+  const safeText = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
+  return `"${safeText.replaceAll('"', '""')}"`;
+}
+
+export function buildAttendanceCsv(report, reportDate) {
+  const rows = [
+    ['Tanggal', 'Nama karyawan', 'Peran', 'Cabang', 'Status', 'Jam masuk', 'Jam pulang', 'Lokasi masuk'],
+    ...report.map((item) => [
+      reportDate,
+      item.userName,
+      item.role,
+      item.branchName,
+      statusLabel(item.status),
+      item.checkInAt ? new Date(item.checkInAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : '',
+      item.checkOutAt ? new Date(item.checkOutAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : '',
+      item.checkInMapsUrl,
+    ]),
+  ];
+  return `\uFEFF${rows.map((row) => row.map(csvCell).join(',')).join('\r\n')}`;
+}
+
+function downloadAttendanceReport(report, reportDate, branchName) {
+  const csv = buildAttendanceCsv(report, reportDate);
+  const blobUrl = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  const downloadLink = document.createElement('a');
+  const filePart = (branchName || 'semua-cabang').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  downloadLink.href = blobUrl;
+  downloadLink.download = `laporan-kehadiran-${reportDate}-${filePart || 'cabang'}.csv`;
+  document.body.append(downloadLink);
+  downloadLink.click();
+  downloadLink.remove();
+  window.setTimeout(() => URL.revokeObjectURL(blobUrl), 0);
+}
+
 function PhotoField({ label, onChange, required = true }) {
   return <label className="field attendance-photo-field">
     <span>{label} {required && <b>*</b>}</span>
-    <input accept="image/*" capture="user" onChange={(event) => onChange(event.target.files?.[0] || null)} required={required} type="file" />
-    <small>Ambil foto langsung. Foto diberi watermark waktu dan koordinat Google Maps sebelum disimpan.</small>
+    <input accept="image/*" onChange={(event) => onChange(event.target.files?.[0] || null)} required={required} type="file" />
+    <small>Ambil foto langsung atau pilih dari galeri. Foto diberi watermark waktu dan koordinat Google Maps sebelum disimpan.</small>
   </label>;
+}
+
+function LiveCameraField({ label, onChange, photo }) {
+  const videoRef = useRef(null);
+  const [stream, setStream] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState('');
+  const [cameraReady, setCameraReady] = useState(false);
+  const [cameraError, setCameraError] = useState('');
+
+  useEffect(() => {
+    if (!stream) return undefined;
+    const video = videoRef.current;
+    if (video) video.srcObject = stream;
+    return () => {
+      stream.getTracks().forEach((track) => track.stop());
+      if (video) video.srcObject = null;
+    };
+  }, [stream]);
+
+  useEffect(() => {
+    if (!photo) {
+      setPreviewUrl('');
+      return undefined;
+    }
+    const url = URL.createObjectURL(photo);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [photo]);
+
+  const startCamera = async () => {
+    setCameraError('');
+    setCameraReady(false);
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraError('Kamera tidak tersedia. Buka halaman melalui HTTPS dan izinkan akses kamera.');
+      return;
+    }
+    try {
+      setStream(await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: { facingMode: 'user' },
+      }));
+    } catch (error) {
+      const message = error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError'
+        ? 'Izin kamera ditolak. Izinkan akses kamera untuk mengambil foto absensi.'
+        : error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError'
+          ? 'Kamera tidak ditemukan pada perangkat ini.'
+          : error.name === 'NotReadableError' || error.name === 'TrackStartError'
+            ? 'Kamera sedang digunakan aplikasi lain. Tutup aplikasi tersebut lalu coba lagi.'
+            : 'Kamera tidak dapat dibuka. Pastikan izin kamera aktif dan halaman menggunakan HTTPS.';
+      setCameraError(message);
+    }
+  };
+
+  const capturePhoto = () => {
+    const video = videoRef.current;
+    if (!video?.videoWidth || !video.videoHeight) {
+      setCameraError('Kamera belum siap. Tunggu sebentar lalu ambil foto kembali.');
+      return;
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const context = canvas.getContext('2d');
+    if (!context) {
+      setCameraError('Foto tidak dapat diproses pada perangkat ini.');
+      return;
+    }
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        setCameraError('Foto gagal diambil. Silakan coba kembali.');
+        return;
+      }
+      onChange(new File([blob], `absensi-${Date.now()}.jpg`, { type: 'image/jpeg' }));
+      setStream(null);
+      setCameraError('');
+    }, 'image/jpeg', 0.9);
+  };
+
+  const retakePhoto = () => {
+    onChange(null);
+    setCameraError('');
+    startCamera();
+  };
+
+  return <div className="field attendance-photo-field">
+    <span>{label} <b>*</b></span>
+    {photo && previewUrl
+      ? <div className="attendance-camera-preview">
+        <img alt={`${label} yang diambil`} src={previewUrl} />
+        <button className="button button-quiet" onClick={retakePhoto} type="button">Ambil ulang foto</button>
+      </div>
+      : stream
+        ? <div className="attendance-camera-preview">
+          <video autoPlay muted onCanPlay={() => setCameraReady(true)} playsInline ref={videoRef} />
+          <button className="button button-primary" disabled={!cameraReady} onClick={capturePhoto} type="button">Ambil foto</button>
+        </div>
+        : <button className="button button-quiet" onClick={startCamera} type="button">Buka kamera</button>}
+    {cameraError && <small className="attendance-camera-error" role="alert">{cameraError}</small>}
+    <small>Foto harus diambil langsung dari kamera. Foto diberi watermark waktu dan koordinat Google Maps sebelum disimpan.</small>
+  </div>;
 }
 
 export function BranchManagement({ role, isAuthenticated }) {
@@ -268,7 +405,8 @@ export function AttendanceWorkspace({ role, isAuthenticated }) {
     requestType: 'permission', startDate: new Date().toISOString().slice(0, 10),
     endDate: new Date().toISOString().slice(0, 10), reason: '',
   });
-  const [attendancePhoto, setAttendancePhoto] = useState(null);
+  const [checkInPhoto, setCheckInPhoto] = useState(null);
+  const [checkOutPhoto, setCheckOutPhoto] = useState(null);
   const [requestPhoto, setRequestPhoto] = useState(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -328,9 +466,9 @@ export function AttendanceWorkspace({ role, isAuthenticated }) {
     if (isAuthenticated) loadReport();
   }, [canViewReport, isAuthenticated, reportDate, branchId]);
 
-  const submitAttendance = async (event, endpoint) => {
+  const submitAttendance = async (event, endpoint, photo, setPhoto) => {
     event.preventDefault();
-    if (!attendancePhoto) {
+    if (!photo) {
       setError('Ambil foto langsung sebelum mengirim absensi.');
       return;
     }
@@ -339,13 +477,13 @@ export function AttendanceWorkspace({ role, isAuthenticated }) {
     setMessage('');
     try {
       const location = await getLocation();
-      const watermarkedPhoto = await addPhotoWatermark(attendancePhoto, location);
+      const watermarkedPhoto = await addPhotoWatermark(photo, location);
       const formData = new FormData();
       formData.append('photo', watermarkedPhoto);
       formData.append('latitude', String(location.latitude));
       formData.append('longitude', String(location.longitude));
       await requestJson(`${operationsUrl}/attendance/${endpoint}`, { method: 'POST', body: formData });
-      setAttendancePhoto(null);
+      setPhoto(null);
       event.currentTarget.reset();
       setMessage(endpoint === 'check-in' ? 'Absensi masuk berhasil tersimpan.' : 'Absensi pulang berhasil tersimpan.');
       await loadToday();
@@ -428,6 +566,7 @@ export function AttendanceWorkspace({ role, isAuthenticated }) {
     counts[item.status] = (counts[item.status] || 0) + 1;
     return counts;
   }, {}), [report]);
+  const selectedBranchName = branches.find((branch) => branch.id === branchId)?.name || 'Semua cabang';
 
   if (!isAuthenticated) return <section className="content"><div className="page-heading"><div><div className="eyebrow">KARYAWAN <span>/</span> KEHADIRAN</div><h1>Absensi & perizinan</h1></div></div><div className="notice">Pratinjau saja. Masuk ke workspace untuk mencatat absensi dan melihat laporan yang tersimpan.</div></section>;
 
@@ -437,13 +576,13 @@ export function AttendanceWorkspace({ role, isAuthenticated }) {
     {error && <div className="notice error-notice" role="alert">{error}</div>}
 
     <section className="attendance-clock-grid">
-      <form className="table-card attendance-action-card" onSubmit={(event) => submitAttendance(event, 'check-in')}>
+      <form className="table-card attendance-action-card" onSubmit={(event) => submitAttendance(event, 'check-in', checkInPhoto, setCheckInPhoto)}>
         <div className="table-heading"><div><h2>Absensi masuk</h2><p>{today?.attendance?.workDate || 'Hari ini'} · {settings.workStart}–{settings.workEnd}</p></div><span className={`attendance-status ${isClockedIn ? 'is-done' : ''}`}>{isClockedIn ? 'Tercatat' : 'Belum absen'}</span></div>
-        {isClockedIn ? <div className="attendance-record-preview"><strong>{new Date(today.attendance.checkInAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</strong><a href={today.attendance.checkInMapsUrl} rel="noreferrer" target="_blank">Lihat lokasi di Google Maps ↗</a></div> : <><PhotoField label="Foto selfie masuk" onChange={setAttendancePhoto} /><button className="button button-primary" disabled={busy} type="submit">{busy ? 'Menyimpan…' : 'Absen masuk dengan foto & lokasi'}</button></>}
+        {isClockedIn ? <div className="attendance-record-preview"><strong>{new Date(today.attendance.checkInAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</strong><a href={today.attendance.checkInMapsUrl} rel="noreferrer" target="_blank">Lihat lokasi di Google Maps ↗</a></div> : <><LiveCameraField label="Foto selfie masuk" onChange={setCheckInPhoto} photo={checkInPhoto} /><button className="button button-primary" disabled={busy || !checkInPhoto} type="submit">{busy ? 'Menyimpan…' : 'Absen masuk dengan foto & lokasi'}</button></>}
       </form>
-      <form className="table-card attendance-action-card" onSubmit={(event) => submitAttendance(event, 'check-out')}>
+      <form className="table-card attendance-action-card" onSubmit={(event) => submitAttendance(event, 'check-out', checkOutPhoto, setCheckOutPhoto)}>
         <div className="table-heading"><div><h2>Absensi pulang</h2><p>Ambil foto dan tandai lokasi saat pulang.</p></div><span className={`attendance-status ${isClockedOut ? 'is-done' : ''}`}>{isClockedOut ? 'Tercatat' : 'Belum absen'}</span></div>
-        {isClockedOut ? <div className="attendance-record-preview"><strong>{new Date(today.attendance.checkOutAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</strong><a href={today.attendance.checkOutMapsUrl} rel="noreferrer" target="_blank">Lihat lokasi di Google Maps ↗</a></div> : <><PhotoField label="Foto selfie pulang" onChange={setAttendancePhoto} /><button className="button button-primary" disabled={busy || !isClockedIn} type="submit">{busy ? 'Menyimpan…' : 'Absen pulang dengan foto & lokasi'}</button></>}
+        {isClockedOut ? <div className="attendance-record-preview"><strong>{new Date(today.attendance.checkOutAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</strong><a href={today.attendance.checkOutMapsUrl} rel="noreferrer" target="_blank">Lihat lokasi di Google Maps ↗</a></div> : <><LiveCameraField label="Foto selfie pulang" onChange={setCheckOutPhoto} photo={checkOutPhoto} /><button className="button button-primary" disabled={busy || !isClockedIn || !checkOutPhoto} type="submit">{busy ? 'Menyimpan…' : 'Absen pulang dengan foto & lokasi'}</button></>}
       </form>
     </section>
 
@@ -474,6 +613,7 @@ export function AttendanceWorkspace({ role, isAuthenticated }) {
       <div className="table-heading"><div><h2>Laporan kehadiran</h2><p>Data alfa dihitung dari jadwal dan toleransi jam kerja yang ditetapkan.</p></div><div className="attendance-report-filters">
         <label className="field"><span>Tanggal</span><input onChange={(event) => setReportDate(event.target.value)} type="date" value={reportDate} /></label>
         <label className="field"><span>Cabang</span><select onChange={(event) => setBranchId(event.target.value)} value={branchId}>{canSeeAllBranches && <option value="">Semua cabang</option>}{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>
+        <button className="button button-quiet" onClick={() => downloadAttendanceReport(report, reportDate, selectedBranchName)} type="button">Ekspor CSV</button>
       </div></div>
       <div className="attendance-counts">{[['present', 'Hadir'], ['absent', 'Alfa'], ['excused', 'Izin disetujui']].map(([key, label]) => <span key={key}>{label}: <strong>{reportCounts[key] || 0}</strong></span>)}</div>
       <div className="table-scroll"><table><thead><tr><th>NAMA</th><th>CABANG</th><th>STATUS</th><th>MASUK</th><th>BUKTI & LOKASI</th></tr></thead><tbody>

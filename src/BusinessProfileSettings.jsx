@@ -20,7 +20,7 @@ export function BusinessProfileSettings({
         <div>
           <div className="eyebrow">PENGATURAN <span>/</span> PROFIL USAHA</div>
           <h1>Profil Usaha</h1>
-          <p>Kelola nama, alamat, dan logo yang digunakan di workspace {profile.name || 'usaha Anda'}.</p>
+          <p>Lengkapi identitas dan informasi kontak usaha {profile.name || 'Anda'}.</p>
         </div>
       </div>
       {notice && <div className="notice" role="status">{notice}</div>}
@@ -58,6 +58,19 @@ export function BusinessProfileSettings({
                   value={profile.address}
                 />
               </label>
+              <label className="field">
+                <span>Nomor HP usaha <i>*</i></span>
+                <input
+                  autoComplete="tel"
+                  disabled={!canEdit || saving}
+                  maxLength="30"
+                  name="phone"
+                  onChange={update}
+                  required
+                  type="tel"
+                  value={profile.phone}
+                />
+              </label>
             </div>
           </section>
           <section className="theme-settings-card theme-assets-card">
@@ -81,7 +94,7 @@ export function BusinessProfileSettings({
             </div>
           </section>
           <div className="theme-save-row">
-            <span>Nama, alamat, dan logo disimpan untuk usaha ini.</span>
+            <span>Nama, alamat, nomor HP, dan logo disimpan untuk usaha ini.</span>
             <button className="button button-primary" disabled={!canEdit || saving || uploading} type="submit">
               {saving ? 'Menyimpan…' : 'Simpan profil'} <span>→</span>
             </button>

@@ -340,6 +340,9 @@ test('verifies email first, then creates a business with its selected modules', 
   expect(screen.getByText('Demo gratis tersisa')).toBeDefined();
   expect(screen.getByRole('button', { name: 'Pembukuan' })).toBeDefined();
   expect(screen.getByRole('button', { name: 'Pengelolaan Akses' })).toBeDefined();
+  expect(screen.getByRole('button', { name: 'Kasir Toko' })).toBeDefined();
+  expect(screen.queryByRole('button', { name: 'Semua Unit' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Input SPK' })).toBeNull();
   const verifyCall = fetchMock.mock.calls.find(([url]) => url === '/api/auth/verify-otp');
   const setupCall = fetchMock.mock.calls.find(([url]) => url === '/api/auth/setup-business');
   expect(verifyCall).toBeDefined();
@@ -377,6 +380,10 @@ test('creates an employee registration link through the server', async () => {
 test('menu navigation updates the URL and exposes delivery only to drivers', () => {
   render(<App />);
   openOwnerPreview();
+  fireEvent.change(screen.getByRole('combobox', { name: 'Pilih akun demo' }), {
+    target: { value: 'user-2' },
+  });
+  expect(screen.queryByRole('button', { name: 'Pengiriman' })).toBeNull();
   fireEvent.change(screen.getByRole('combobox', { name: 'Pilih akun demo' }), {
     target: { value: 'user-6' },
   });
@@ -537,6 +544,8 @@ test('allows SPK verification and approval only for the matching permissions', (
   fireEvent.click(screen.getByRole('button', { name: /Approval/ }));
   expect(screen.getByRole('button', { name: 'Setujui SPK SPK-WAM-20261120-0003' })).toBeDefined();
   expect(screen.queryByRole('button', { name: /Verifikasi SPK SPK-/ })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: /Notifikasi persetujuan/ }));
+  expect(screen.getByRole('heading', { name: 'Approval' })).toBeDefined();
 });
 
 test('keeps bookkeeping visible after saving a note with a server date timestamp', async () => {
@@ -706,7 +715,7 @@ test('routes a restaurant digital order through cashier, kitchen, waiter, paymen
   expect(screen.getByText('SELESAI')).toBeDefined();
   expect(screen.getByText('LUNAS')).toBeDefined();
 
-  fireEvent.click(screen.getByRole('button', { name: 'Nota Digital' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Nota Restoran' }));
   const shareUrl = new URL(screen.getByRole('link', { name: /Bagikan nota via WhatsApp/i }).href);
   expect(shareUrl.hostname).toBe('wa.me');
   expect(shareUrl.searchParams.get('text')).toContain('Meja: 05');

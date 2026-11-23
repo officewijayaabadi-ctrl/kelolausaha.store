@@ -921,6 +921,7 @@ app.get('/api/workspace/profile', authenticate, requireTenant, async (req, res, 
   try {
     const result = await pool.query(
       `SELECT c.name,
+              COALESCE(c.phone, '') AS phone,
               COALESCE((
                 SELECT b.address
                 FROM business_branches b
@@ -942,13 +943,15 @@ app.get('/api/workspace/profile', authenticate, requireTenant, async (req, res, 
 app.put('/api/workspace/profile', authenticate, requireRole('SUPER ADMIN', 'OWNER'), requireTenant, async (req, res, next) => {
   const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
   const address = typeof req.body?.address === 'string' ? req.body.address.trim() : '';
+  const phone = typeof req.body?.phone === 'string' ? req.body.phone.trim() : '';
   const logoUrl = typeof req.body?.logoUrl === 'string' ? req.body.logoUrl.trim() : '';
   const validAsset = !logoUrl
     || (logoUrl.length <= 500
       && logoUrl.startsWith(`/uploads/${req.user.company_id}/`)
       && !logoUrl.includes('..'));
-  if (!name || name.length > 160 || !address || address.length > 500 || !validAsset) {
-    return res.status(400).json({ message: 'Nama, alamat, atau logo usaha tidak valid.' });
+  if (!name || name.length > 160 || !address || address.length > 500
+    || !/^[+()\d\s.-]{8,30}$/.test(phone) || !validAsset) {
+    return res.status(400).json({ message: 'Nama, alamat, nomor HP, atau logo usaha tidak valid.' });
   }
 
   const client = await pool.connect();
@@ -957,15 +960,16 @@ app.put('/api/workspace/profile', authenticate, requireRole('SUPER ADMIN', 'OWNE
     const company = await client.query(
       `UPDATE companies
        SET name = $1,
+           phone = $2,
            theme_settings = jsonb_set(
              COALESCE(theme_settings, '{}'::jsonb),
              '{logoUrl}',
-             to_jsonb($2::text),
+             to_jsonb($3::text),
              true
            )
-       WHERE id = $3
-       RETURNING name, theme_settings ->> 'logoUrl' AS "logoUrl"`,
-      [name, logoUrl, req.user.company_id],
+       WHERE id = $4
+       RETURNING name, phone, theme_settings ->> 'logoUrl' AS "logoUrl"`,
+      [name, phone, logoUrl, req.user.company_id],
     );
     if (!company.rowCount) {
       await client.query('ROLLBACK');

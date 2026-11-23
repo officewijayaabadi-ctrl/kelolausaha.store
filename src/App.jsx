@@ -256,6 +256,24 @@ function getUserMenus(user) {
   return [...baseMenus, ...additionalMenus];
 }
 
+const businessMenuLabels = {
+  laundry: { Kasir: 'Kasir Laundry', 'Daftar Harga': 'Layanan & Harga', Transaksi: 'Transaksi Laundry', 'Nota Digital': 'Nota Laundry', Customer: 'Pelanggan' },
+  dealer_motor: {},
+  retail: { Kasir: 'Kasir Toko', 'Daftar Harga': 'Produk & Harga', Transaksi: 'Transaksi Toko', 'Nota Digital': 'Nota Toko', 'Laporan Penjualan': 'Laporan Usaha', Customer: 'Pelanggan' },
+  restaurant: { Kasir: 'Kasir Restoran', 'Daftar Harga': 'Menu & Harga', Transaksi: 'Transaksi Restoran', 'Nota Digital': 'Nota Restoran', Pesanan: 'Antrean Pesanan', 'Laporan Penjualan': 'Laporan Usaha', Customer: 'Pelanggan' },
+  services: { Kasir: 'Kasir Layanan', 'Daftar Harga': 'Layanan & Tarif', Transaksi: 'Transaksi Layanan', 'Nota Digital': 'Nota Layanan', 'Laporan Penjualan': 'Laporan Usaha', Customer: 'Pelanggan' },
+  workshop: { Kasir: 'Kasir Bengkel', 'Daftar Harga': 'Jasa & Sparepart', Transaksi: 'Transaksi Bengkel', 'Nota Digital': 'Nota Bengkel', Customer: 'Pelanggan' },
+  salon: { Kasir: 'Kasir Salon', 'Daftar Harga': 'Layanan & Tarif', Transaksi: 'Transaksi Salon', 'Nota Digital': 'Nota Salon', Customer: 'Pelanggan' },
+  printing: { Kasir: 'Kasir Percetakan', 'Daftar Harga': 'Produk & Harga Cetak', Transaksi: 'Transaksi Percetakan', 'Nota Digital': 'Nota Percetakan', Customer: 'Pelanggan' },
+  distribution: { Kasir: 'Kasir Grosir', 'Daftar Harga': 'Produk & Harga Grosir', Transaksi: 'Transaksi Grosir', 'Nota Digital': 'Nota Grosir', 'Laporan Penjualan': 'Laporan Usaha', Customer: 'Pelanggan' },
+};
+
+const dealerOnlyMenus = new Set([
+  'Input SPK', 'Semua SPK', 'SPK', 'SPK Saya', 'Pengajuan', 'Follow Up',
+  'Verifikasi SPK', 'Approval', 'Sales', 'Motor', 'Leasing', 'Leasing & Promo',
+  'Dokumen', 'Pengiriman', 'Performance', 'Semua Unit', 'Unit Dealer', 'Unit & Motor', 'Target',
+]);
+
 const initialUsers = [
   { id: 'user-1', name: 'Aditya Pratama', email: 'aditya@wam.co.id', role: 'SUPER ADMIN', active: true },
   { id: 'user-2', name: 'Rika Wijaya', email: 'rika@wam.co.id', role: 'OWNER', active: true },
@@ -914,7 +932,7 @@ function App() {
   const [accountProfileOpen, setAccountProfileOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [logoutError, setLogoutError] = useState('');
-  const [businessProfile, setBusinessProfile] = useState({ name: '', address: '', logoUrl: '' });
+  const [businessProfile, setBusinessProfile] = useState({ name: '', address: '', phone: '', logoUrl: '' });
   const [businessProfileLoading, setBusinessProfileLoading] = useState(false);
   const [businessProfileSaving, setBusinessProfileSaving] = useState(false);
   const [businessProfileUploading, setBusinessProfileUploading] = useState(false);
@@ -1848,6 +1866,7 @@ function App() {
     setBusinessProfile({
       name: businessName,
       address: '',
+      phone: '',
       logoUrl: typeof result.business?.themeSettings?.logoUrl === 'string'
         ? result.business.themeSettings.logoUrl
         : '',
@@ -1935,6 +1954,10 @@ function App() {
     : null;
   const ownerTrialCountdown = ownerTrialEnd ? getCountdown(ownerTrialEnd, countdownNow) : null;
   const activeThemeColors = getThemeColors(themeSettings);
+  const canApproveSpk = businessType === 'dealer_motor'
+    && workspaceModules.includes('sales_orders')
+    && activeUser.permissions.includes('spkApprove');
+  const pendingApprovalCount = spks.filter((item) => item.status === 'APPROVAL SVP').length;
   const enabledMenus = {
     Kasir: 'pos',
     'Daftar Harga': 'prices',
@@ -1942,6 +1965,13 @@ function App() {
     'Nota Digital': 'digital_receipts',
     'Menu Digital': 'menu',
     Pesanan: 'orders',
+    Customer: 'customers',
+    Sales: 'sales_team',
+    Leasing: 'financing',
+    'Leasing & Promo': 'financing',
+    'Laporan Penjualan': 'sales_reports',
+    Performance: 'sales_reports',
+    Target: 'targets',
     'Semua Unit': 'vehicles',
     'Unit Dealer': 'vehicles',
     'Unit & Motor': 'vehicles',
@@ -1953,10 +1983,13 @@ function App() {
     Pengajuan: 'sales_orders',
     'Verifikasi SPK': 'sales_orders',
     Approval: 'sales_orders',
-    Pengiriman: 'sales_orders',
+    Dokumen: 'sales_orders',
   };
   const menus = getUserMenus(activeUser).filter(([label]) => (
-    !enabledMenus[label] || workspaceModules.includes(enabledMenus[label])
+    (!enabledMenus[label] || workspaceModules.includes(enabledMenus[label]))
+    && (businessType === 'dealer_motor' || !dealerOnlyMenus.has(label))
+    && (label !== 'Pesanan' || businessType === 'restaurant')
+    && (label !== 'Pengiriman' || activeUser.role === 'DRIVER')
   )).filter(([label]) => label !== 'Aktivasi' || activeUser.role === 'OWNER')
     .filter(([label]) => !billingData?.business?.subscription
     || billingData.business.subscription.status !== 'expired'
@@ -1975,6 +2008,9 @@ function App() {
     items: menus.filter(([label]) => section.labels.includes(label)),
   })).filter((section) => section.items.length > 0);
   const heading = activePage === 'SPK Saya' || activePage === 'Pengajuan' ? 'Semua SPK' : activePage;
+  const visibleSpks = activePage === 'Approval'
+    ? spks.filter((item) => item.status === 'APPROVAL SVP')
+    : spks;
 
   useEffect(() => {
     const pageIsAllowed = activePage === 'Dashboard'
@@ -2129,8 +2165,11 @@ function App() {
             && typeof savedProfile.name === 'string'
             && typeof savedProfile.address === 'string'
             && typeof savedProfile.logoUrl === 'string'
-            ? savedProfile
-            : { name: dealerName, address: '', logoUrl: '' });
+            ? {
+              ...savedProfile,
+              phone: typeof savedProfile.phone === 'string' ? savedProfile.phone : '',
+            }
+            : { name: dealerName, address: '', phone: '', logoUrl: '' });
         } catch (error) {
           setBusinessProfileError(`Profil demo tidak dapat dimuat: ${error.message}`);
         }
@@ -2146,7 +2185,8 @@ function App() {
         if (!response.ok) throw new Error(result.message || 'Profil usaha tidak dapat dimuat.');
         const profile = result.profile;
         if (!profile || typeof profile.name !== 'string'
-          || typeof profile.address !== 'string' || typeof profile.logoUrl !== 'string') {
+          || typeof profile.address !== 'string' || typeof profile.phone !== 'string'
+          || typeof profile.logoUrl !== 'string') {
           throw new Error('Data profil usaha dari server tidak valid.');
         }
         if (cancelled) return;
@@ -2384,6 +2424,7 @@ function App() {
     const profile = {
       name: businessProfile.name.trim(),
       address: businessProfile.address.trim(),
+      phone: businessProfile.phone.trim(),
       logoUrl: businessProfile.logoUrl,
     };
 
@@ -2413,7 +2454,8 @@ function App() {
       const result = await response.json();
       if (!response.ok) throw new Error(result.message || 'Profil usaha tidak dapat disimpan.');
       if (!result.profile || typeof result.profile.name !== 'string'
-        || typeof result.profile.address !== 'string' || typeof result.profile.logoUrl !== 'string') {
+        || typeof result.profile.address !== 'string' || typeof result.profile.phone !== 'string'
+        || typeof result.profile.logoUrl !== 'string') {
         throw new Error('Data profil usaha dari server tidak valid.');
       }
       setBusinessProfile(result.profile);
@@ -2425,6 +2467,7 @@ function App() {
           business: {
             ...current.business,
             name: result.profile.name,
+            phone: result.profile.phone,
             themeSettings: { ...current.business.themeSettings, logoUrl: result.profile.logoUrl },
           },
         }
@@ -2601,8 +2644,8 @@ function App() {
                   type="button"
                 >
                   <span className="nav-icon" aria-hidden="true">{icon}</span>
-                  <span>{label}</span>
-                  {label === 'Approval' && <span className="nav-count">2</span>}
+                  <span>{businessMenuLabels[businessType]?.[label] || label}</span>
+                  {label === 'Approval' && pendingApprovalCount > 0 && <span className="nav-count">{pendingApprovalCount}</span>}
                 </button>
               ))}
             </div>
@@ -2658,8 +2701,20 @@ function App() {
                 {users.map((user) => <option disabled={!user.active} key={user.id} value={user.id}>{user.name} · {user.role}{user.active ? '' : ' (nonaktif)'}</option>)}
               </select>
             </label>}
-            <button className="icon-button notification-button" aria-label={`Notifikasi${unreadBillingNotifications.length ? `, ${unreadBillingNotifications.length} belum dibaca` : ''}`} onClick={() => openPage(activeUser.role === 'PLATFORM_OWNER' ? 'Semua Usaha' : activeUser.role === 'OWNER' ? 'Aktivasi' : 'Dashboard')} type="button">
-              ♧{unreadBillingNotifications.length > 0 && <span className="notification-dot" />}
+            <button
+              aria-label={canApproveSpk
+                ? `Notifikasi persetujuan${pendingApprovalCount ? `, ${pendingApprovalCount} menunggu` : ''}`
+                : `Notifikasi${unreadBillingNotifications.length ? `, ${unreadBillingNotifications.length} belum dibaca` : ''}`}
+              className="icon-button notification-button"
+              onClick={() => openPage(canApproveSpk
+                ? 'Approval'
+                : activeUser.role === 'PLATFORM_OWNER' ? 'Semua Usaha' : activeUser.role === 'OWNER' ? 'Aktivasi' : 'Dashboard')}
+              type="button"
+            >
+              <svg aria-hidden="true" fill="none" viewBox="0 0 24 24"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" /></svg>
+              {canApproveSpk
+                ? pendingApprovalCount > 0 && <span className="notification-count">{pendingApprovalCount}</span>
+                : unreadBillingNotifications.length > 0 && <span className="notification-dot" />}
             </button>
             <div className="account-menu-shell">
               <button
@@ -3423,9 +3478,9 @@ function App() {
             <div className="page-heading"><div><div className="eyebrow">MANAJEMEN DEALER <span>/</span> {heading.toUpperCase()}</div><h1>{heading}</h1><p>Kelola data dan aktivitas {heading.toLowerCase()} Dealer WAM.</p></div>{(heading === 'Semua SPK' || heading === 'SPK') && activeUser.permissions.includes('spkCreate') && <button className="button button-primary" onClick={beginNewSpk} type="button"><span className="plus">+</span> Buat SPK baru</button>}</div>
             {notice && <div className="notice" role="status">{notice}</div>}
             <section className="table-card full-table">
-              <div className="table-heading"><div><h2>{heading === 'Semua SPK' || heading === 'SPK' ? 'Daftar SPK' : `Data ${heading}`}</h2><p>{spks.length} pengajuan penjualan terdaftar</p></div><div className="table-tools"><input aria-label="Cari data" placeholder="Cari customer atau nomor SPK..." /><button className="filter-button" type="button">Semua status <span>⌄</span></button></div></div>
+              <div className="table-heading"><div><h2>{heading === 'Semua SPK' || heading === 'SPK' ? 'Daftar SPK' : `Data ${heading}`}</h2><p>{visibleSpks.length} pengajuan penjualan terdaftar</p></div><div className="table-tools"><input aria-label="Cari data" placeholder="Cari customer atau nomor SPK..." /><button className="filter-button" type="button">Semua status <span>⌄</span></button></div></div>
               <div className="table-scroll"><table><thead><tr><th>NOMOR SPK</th><th>CUSTOMER</th><th>KENDARAAN</th><th>SALES</th><th>NILAI OTR</th><th>STATUS</th><th /></tr></thead><tbody>
-                {spks.map((item) => <tr key={item.id}><td><strong className="spk-id">{item.spkNumber || item.id}</strong><small>{item.date || item.createdDate}</small></td><td><strong>{item.customer}</strong><small>Customer</small></td><td>{item.motor}</td><td>{item.sales}</td><td className="amount">{rupiah(item.amount)}</td><td><span className={`status-badge ${statusClass(item.status)}`}><span />{item.status}</span></td><td className="spk-actions">
+                {visibleSpks.map((item) => <tr key={item.id}><td><strong className="spk-id">{item.spkNumber || item.id}</strong><small>{item.date || item.createdDate}</small></td><td><strong>{item.customer}</strong><small>Customer</small></td><td>{item.motor}</td><td>{item.sales}</td><td className="amount">{rupiah(item.amount)}</td><td><span className={`status-badge ${statusClass(item.status)}`}><span />{item.status}</span></td><td className="spk-actions">
                   {activeUser.permissions.includes('spkVerify') && ['SUBMITTED', 'VERIFIKASI ADMIN'].includes(item.status) && <button aria-label={`Verifikasi SPK ${item.spkNumber || item.id}`} className="button button-quiet" onClick={() => verifySpk(item)} type="button">Verifikasi SPK</button>}
                   {activeUser.permissions.includes('spkVerify') && item.status === 'SUBMITTED' && <button aria-label={`Tolak SPK ${item.spkNumber || item.id}`} className="button button-quiet" onClick={() => rejectSpk(item)} type="button">Tolak SPK</button>}
                   {activeUser.permissions.includes('spkApprove') && item.status === 'APPROVAL SVP' && <button aria-label={`Setujui SPK ${item.spkNumber || item.id}`} className="button button-primary" onClick={() => approveSpk(item)} type="button">Setujui SPK</button>}
@@ -3435,6 +3490,7 @@ function App() {
                     || (item.status === 'APPROVAL SVP' && !activeUser.permissions.includes('spkApprove'))
                     ? <span aria-label="Tidak ada tindakan SPK">—</span> : null}
                 </td></tr>)}
+                {visibleSpks.length === 0 && <tr><td colSpan="7">Tidak ada pengajuan yang menunggu approval.</td></tr>}
               </tbody></table></div>
             </section>
           </section>
