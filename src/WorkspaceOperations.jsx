@@ -468,6 +468,7 @@ export function AttendanceWorkspace({ role, isAuthenticated }) {
 
   const submitAttendance = async (event, endpoint, photo, setPhoto) => {
     event.preventDefault();
+    const form = event.currentTarget;
     if (!photo) {
       setError('Ambil foto langsung sebelum mengirim absensi.');
       return;
@@ -484,7 +485,7 @@ export function AttendanceWorkspace({ role, isAuthenticated }) {
       formData.append('longitude', String(location.longitude));
       await requestJson(`${operationsUrl}/attendance/${endpoint}`, { method: 'POST', body: formData });
       setPhoto(null);
-      event.currentTarget.reset();
+      form.reset();
       setMessage(endpoint === 'check-in' ? 'Absensi masuk berhasil tersimpan.' : 'Absensi pulang berhasil tersimpan.');
       await loadToday();
     } catch (submitError) {
@@ -496,6 +497,7 @@ export function AttendanceWorkspace({ role, isAuthenticated }) {
 
   const submitRequest = async (event) => {
     event.preventDefault();
+    const form = event.currentTarget;
     if (!requestPhoto) {
       setError('Foto bukti wajib diunggah untuk pengajuan.');
       return;
@@ -514,7 +516,7 @@ export function AttendanceWorkspace({ role, isAuthenticated }) {
       await requestJson(`${operationsUrl}/attendance/requests`, { method: 'POST', body: formData });
       setRequestPhoto(null);
       setRequestDraft((current) => ({ ...current, reason: '' }));
-      event.currentTarget.reset();
+      form.reset();
       setMessage('Pengajuan berhasil dikirim dan menunggu persetujuan.');
       await loadReport();
     } catch (submitError) {
@@ -578,11 +580,11 @@ export function AttendanceWorkspace({ role, isAuthenticated }) {
     <section className="attendance-clock-grid">
       <form className="table-card attendance-action-card" onSubmit={(event) => submitAttendance(event, 'check-in', checkInPhoto, setCheckInPhoto)}>
         <div className="table-heading"><div><h2>Absensi masuk</h2><p>{today?.attendance?.workDate || 'Hari ini'} · {settings.workStart}–{settings.workEnd}</p></div><span className={`attendance-status ${isClockedIn ? 'is-done' : ''}`}>{isClockedIn ? 'Tercatat' : 'Belum absen'}</span></div>
-        {isClockedIn ? <div className="attendance-record-preview"><strong>{new Date(today.attendance.checkInAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</strong><a href={today.attendance.checkInMapsUrl} rel="noreferrer" target="_blank">Lihat lokasi di Google Maps ↗</a></div> : <><LiveCameraField label="Foto selfie masuk" onChange={setCheckInPhoto} photo={checkInPhoto} /><button className="button button-primary" disabled={busy || !checkInPhoto} type="submit">{busy ? 'Menyimpan…' : 'Absen masuk dengan foto & lokasi'}</button></>}
+        {isClockedIn ? <div className="attendance-record-preview"><strong>Sudah absen masuk · {new Date(today.attendance.checkInAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</strong><a href={today.attendance.checkInMapsUrl} rel="noreferrer" target="_blank">Lihat lokasi di Google Maps ↗</a></div> : <><LiveCameraField label="Foto selfie masuk" onChange={setCheckInPhoto} photo={checkInPhoto} /><button className="button button-primary" disabled={busy || !checkInPhoto} type="submit">{busy ? 'Menyimpan…' : 'Absen masuk dengan foto & lokasi'}</button></>}
       </form>
       <form className="table-card attendance-action-card" onSubmit={(event) => submitAttendance(event, 'check-out', checkOutPhoto, setCheckOutPhoto)}>
-        <div className="table-heading"><div><h2>Absensi pulang</h2><p>Ambil foto dan tandai lokasi saat pulang.</p></div><span className={`attendance-status ${isClockedOut ? 'is-done' : ''}`}>{isClockedOut ? 'Tercatat' : 'Belum absen'}</span></div>
-        {isClockedOut ? <div className="attendance-record-preview"><strong>{new Date(today.attendance.checkOutAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</strong><a href={today.attendance.checkOutMapsUrl} rel="noreferrer" target="_blank">Lihat lokasi di Google Maps ↗</a></div> : <><LiveCameraField label="Foto selfie pulang" onChange={setCheckOutPhoto} photo={checkOutPhoto} /><button className="button button-primary" disabled={busy || !isClockedIn || !checkOutPhoto} type="submit">{busy ? 'Menyimpan…' : 'Absen pulang dengan foto & lokasi'}</button></>}
+        <div className="table-heading"><div><h2>Absensi pulang</h2><p>{isClockedIn ? 'Ambil foto dan tandai lokasi saat pulang.' : 'Selesaikan absensi masuk terlebih dahulu.'}</p></div><span className={`attendance-status ${isClockedOut ? 'is-done' : ''}`}>{isClockedOut ? 'Sudah absen pulang' : 'Belum absen'}</span></div>
+        {isClockedOut ? <div className="attendance-record-preview"><strong>Sudah absen pulang · {new Date(today.attendance.checkOutAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</strong><a href={today.attendance.checkOutMapsUrl} rel="noreferrer" target="_blank">Lihat lokasi di Google Maps ↗</a></div> : isClockedIn ? <><LiveCameraField label="Foto selfie pulang" onChange={setCheckOutPhoto} photo={checkOutPhoto} /><button className="button button-primary" disabled={busy || !checkOutPhoto} type="submit">{busy ? 'Menyimpan…' : 'Absen pulang dengan foto & lokasi'}</button></> : <p className="attendance-record-preview">Absen masuk dulu sebelum mengambil foto absensi pulang.</p>}
       </form>
     </section>
 

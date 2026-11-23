@@ -48,6 +48,42 @@ test('requires a live camera photo for attendance instead of an image file', asy
 
   expect(await screen.findByRole('heading', { name: 'Absensi masuk' })).toBeDefined();
   await waitFor(() => expect(container.querySelectorAll('input[type="file"]')).toHaveLength(1));
-  expect(screen.getAllByRole('button', { name: 'Buka kamera' })).toHaveLength(2);
+  expect(screen.getAllByRole('button', { name: 'Buka kamera' })).toHaveLength(1);
+  expect(container.querySelectorAll('.attendance-action-card input[type="file"]')).toHaveLength(0);
+});
+
+test('shows one camera and prevents repeating check-in when attendance is already recorded', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (url) => {
+    let result = {};
+    if (url.endsWith('/attendance/today')) {
+      result = {
+        attendance: {
+          checkInAt: '2026-11-23T01:00:00.000Z',
+          checkInMapsUrl: 'https://maps.google.com/?q=-7.1,112.2',
+          checkOutAt: null,
+        },
+      };
+    }
+    if (url.endsWith('/branches')) result = { branches: [{ id: 'branch-id', name: 'Cabang' }] };
+    if (url.endsWith('/attendance/settings')) {
+      result = {
+        settings: {
+          timezone: 'Asia/Jakarta',
+          workStart: '08:00',
+          workEnd: '17:00',
+          workDays: [1, 2, 3, 4, 5, 6],
+          graceMinutes: 15,
+        },
+      };
+    }
+    if (url.includes('/attendance/requests')) result = { requests: [] };
+    return { ok: true, json: async () => result };
+  }));
+
+  const { container } = render(<AttendanceWorkspace isAuthenticated role="SALES" />);
+
+  expect(await screen.findByText(/Sudah absen masuk/)).toBeDefined();
+  expect(screen.queryByRole('button', { name: 'Absen masuk dengan foto & lokasi' })).toBeNull();
+  expect(screen.getAllByRole('button', { name: 'Buka kamera' })).toHaveLength(1);
   expect(container.querySelectorAll('.attendance-action-card input[type="file"]')).toHaveLength(0);
 });
