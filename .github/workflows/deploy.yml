@@ -180,6 +180,7 @@ jobs:
                 ssl_certificate /etc/letsencrypt/live/kelolausaha-tenant-wildcard/fullchain.pem;
                 ssl_certificate_key /etc/letsencrypt/live/kelolausaha-tenant-wildcard/privkey.pem;
 
+                # KelolaUsaha Socket.IO websocket endpoint
                 location ^~ /api/socket.io/ {
                     proxy_pass http://127.0.0.1:4000;
                     proxy_http_version 1.1;
@@ -427,6 +428,73 @@ jobs:
 
             echo "Building frontend..."
             npm run build
+
+            echo "Configuring the Socket.IO reverse proxy..."
+            sudo python3 - <<'PY'
+            from pathlib import Path
+            import subprocess
+
+            socket_location = """    # KelolaUsaha Socket.IO websocket endpoint
+                location ^~ /api/socket.io/ {
+                    proxy_pass http://127.0.0.1:4000;
+                    proxy_http_version 1.1;
+                    proxy_set_header Upgrade $http_upgrade;
+                    proxy_set_header Connection "upgrade";
+                    proxy_set_header Host $host;
+                    proxy_set_header X-Real-IP $remote_addr;
+                    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                    proxy_set_header X-Forwarded-Proto $scheme;
+                    proxy_read_timeout 120s;
+                }
+
+            """
+            configurations = [
+                (Path("/etc/nginx/sites-available/kelolausaha.store"), "    # Backend API\n", True),
+                (
+                    Path("/etc/nginx/sites-available/kelolausaha-tenant-wildcard"),
+                    "                location = /api {\n",
+                    False,
+                ),
+            ]
+            changed = []
+            marker = "# KelolaUsaha Socket.IO websocket endpoint"
+
+            for path, anchor, required in configurations:
+                if not path.exists():
+                    if required:
+                        raise SystemExit(f"Required Nginx vhost not found: {path}")
+                    continue
+                original = path.read_text()
+                if marker in original or "location ^~ /api/socket.io/" in original:
+                    continue
+                if not required and "# KelolaUsaha tenant wildcard only; does not change other vhosts." not in original:
+                    continue
+                if original.count(anchor) != 1:
+                    if required:
+                        raise SystemExit(f"Expected Nginx insertion point not found in {path}")
+                    continue
+                backup = path.with_name(path.name + ".support-socket.bak")
+                if backup.exists():
+                    raise SystemExit(f"Refusing to overwrite existing backup: {backup}")
+                backup.write_text(original)
+                path.write_text(original.replace(anchor, socket_location + anchor, 1))
+                changed.append((path, backup, original))
+
+            if changed:
+                try:
+                    subprocess.run(["nginx", "-t"], check=True)
+                    subprocess.run(["systemctl", "reload", "nginx"], check=True)
+                except Exception:
+                    for path, backup, original in changed:
+                        path.write_text(original)
+                        backup.unlink()
+                    raise
+                for _, backup, _ in changed:
+                    backup.unlink()
+                print("Socket.IO websocket proxy configured.")
+            else:
+                print("Socket.IO websocket proxy already configured.")
+            PY
 
             echo "Restarting backend..."
             systemctl restart kelolausaha
