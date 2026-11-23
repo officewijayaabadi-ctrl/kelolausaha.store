@@ -4,8 +4,19 @@ import QRCode from 'qrcode';
 import './App.css';
 import PublicSite from './PublicSite';
 import { plans as activationPlans } from '../shared/plans.js';
-import { businessTypes } from '../shared/business-modules.js';
-import { dashboardThemes, defaultThemeSettings, getThemeColors, normalizeThemeSettings } from './themes.js';
+import {
+  businessTypes,
+  filterPermissionsForBusiness,
+  isPermissionAvailableForBusiness,
+} from '../shared/business-modules.js';
+import {
+  dashboardThemes,
+  defaultThemeSettings,
+  getThemeColors,
+  normalizeThemeSettings,
+  receiptAccents,
+  receiptModes,
+} from './themes.js';
 import IndustryDashboard from './IndustryDashboard.jsx';
 import { AttendanceWorkspace, BranchManagement } from './WorkspaceOperations.jsx';
 import { DealerMotorWorkspace, DriverDeliveryWorkspace } from './DealerMotorWorkspace.jsx';
@@ -38,6 +49,7 @@ const roleMenus = {
     ['User Management', '♧'],
     ['Pengelolaan Akses', '♙'],
     ['Tampilan Dashboard', '⚙'],
+    ['Pengaturan Nota', '▧'],
     ['Log Aktivitas', '▤'],
   ],
   OWNER: [
@@ -61,6 +73,7 @@ const roleMenus = {
     ['Target', '◎'],
     ['User Management', '♙'],
     ['Tampilan Dashboard', '⚙'],
+    ['Pengaturan Nota', '▧'],
   ],
   SVP: [
     ['Dashboard', '▦'],
@@ -139,7 +152,7 @@ const accessModules = [
   { id: 'spkViewOwn', label: 'Lihat SPK sendiri', group: 'Penjualan' },
   { id: 'spkVerify', label: 'Verifikasi SPK', group: 'Penjualan' },
   { id: 'spkApprove', label: 'Approval SPK', group: 'Penjualan' },
-  { id: 'customerManage', label: 'Data customer', group: 'Data dealer' },
+  { id: 'customerManage', label: 'Data pelanggan', group: 'Data pelanggan' },
   { id: 'salesManage', label: 'Data sales', group: 'Data dealer' },
   { id: 'unitManage', label: 'Unit dealer & motor', group: 'Data dealer' },
   { id: 'deliveryManage', label: 'Pengiriman motor', group: 'Operasional' },
@@ -182,6 +195,7 @@ const superAdminRestrictedPermissions = [
   'reportsView', 'targetManage', 'financeView', 'financeManage',
   'activationManage',
 ];
+const platformAccessPermissions = new Set(['platformBusinesses', 'platformBilling', 'supportManage']);
 
 const extraPermissionMenus = [
   ['Input SPK', '+', 'spkCreate'],
@@ -236,6 +250,7 @@ function menuPermission(label) {
   if (label === 'Semua Usaha') return 'platformBusinesses';
   if (label === 'Pusat Bantuan') return 'supportManage';
   if (['Tampilan Dashboard', 'Profil Usaha'].includes(label)) return 'themeManage';
+  if (label === 'Pengaturan Nota') return 'themeManage';
   if (label === 'Absensi') return 'attendanceView';
   if (label === 'Cabang') return 'branchManage';
   return null;
@@ -544,6 +559,129 @@ function normalizeWhatsAppNumber(value) {
   if (digits.startsWith('0')) return `62${digits.slice(1)}`;
   if (digits.startsWith('8')) return `62${digits}`;
   return digits;
+}
+
+function escapeSvgText(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (character) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&apos;',
+  })[character]);
+}
+
+function createPosReceiptSvg(transaction, businessName, receiptSettings = defaultThemeSettings.receiptSettings) {
+  const width = 900;
+  const itemTop = 320;
+  const itemHeight = 94;
+  const noteHeight = transaction.specialNotes ? 70 : 0;
+  const height = itemTop + transaction.items.length * itemHeight + noteHeight + 260;
+  const accentColor = ({
+    emerald: '#059669',
+    crimson: '#dc2626',
+    royal: '#2563eb',
+  })[receiptSettings.accent] || '#059669';
+  const receiptAddress = String(receiptSettings.storeAddress || '').trim();
+  const receiptFooter = String(receiptSettings.footerNote || '').trim();
+  const receiptTitle = receiptSettings.mode === 'thermal'
+    ? 'STRUK PEMBAYARAN'
+    : receiptSettings.mode === 'mobile' ? 'NOTA DIGITAL' : 'NOTA PEMBAYARAN';
+  const date = new Intl.DateTimeFormat('id-ID', {
+    dateStyle: 'long',
+    timeStyle: 'short',
+  }).format(new Date(transaction.createdAt));
+  const businessNameFit = String(businessName).length > 30
+    ? 'textLength="690" lengthAdjust="spacingAndGlyphs"'
+    : '';
+  const lines = [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`,
+    `<rect width="${width}" height="${height}" rx="28" fill="#ffffff"/>`,
+    '<rect x="28" y="28" width="844" height="174" rx="22" fill="#f8fafc"/>',
+    `<rect x="56" y="58" width="72" height="72" rx="18" fill="${accentColor}"/>`,
+    '<text x="92" y="106" fill="#ffffff" font-family="Arial,sans-serif" font-size="30" font-weight="700" text-anchor="middle">KU</text>',
+    `<text x="154" y="84" fill="#26352e" font-family="Arial,sans-serif" font-size="30" font-weight="700" ${businessNameFit}>${escapeSvgText(businessName)}</text>`,
+    `<text x="154" y="126" fill="${accentColor}" font-family="Arial,sans-serif" font-size="20" font-weight="700">${receiptTitle}</text>`,
+    `<text x="154" y="160" fill="#68736d" font-family="Arial,sans-serif" font-size="17">No. Nota: ${escapeSvgText(transaction.receiptNumber)}</text>`,
+    ...(receiptAddress ? [`<text x="154" y="190" fill="#68736d" font-family="Arial,sans-serif" font-size="15">${escapeSvgText(receiptAddress)}</text>`] : []),
+    `<text x="56" y="248" fill="#758078" font-family="Arial,sans-serif" font-size="17">PELANGGAN</text>`,
+    `<text x="56" y="280" fill="#26352e" font-family="Arial,sans-serif" font-size="23" font-weight="700">${escapeSvgText(transaction.customer || 'Pelanggan umum')}</text>`,
+    `<text x="844" y="248" fill="#758078" font-family="Arial,sans-serif" font-size="17" text-anchor="end">${escapeSvgText(date)}</text>`,
+    '<line x1="56" y1="302" x2="844" y2="302" stroke="#e8ece9" stroke-width="2"/>',
+  ];
+  transaction.items.forEach((item, index) => {
+    const y = itemTop + index * itemHeight;
+    const itemNameFit = String(item.name).length > 36
+      ? 'textLength="500" lengthAdjust="spacingAndGlyphs"'
+      : '';
+    lines.push(
+      `<text x="56" y="${y}" fill="#26352e" font-family="Arial,sans-serif" font-size="22" font-weight="700" ${itemNameFit}>${escapeSvgText(item.name)}</text>`,
+      `<text x="56" y="${y + 34}" fill="#758078" font-family="Arial,sans-serif" font-size="17">${escapeSvgText(`${item.quantity} ${item.unit} × ${rupiah(item.price)}`)}</text>`,
+      `<text x="844" y="${y + 12}" fill="#26352e" font-family="Arial,sans-serif" font-size="22" font-weight="700" text-anchor="end">${escapeSvgText(rupiah(item.quantity * item.price))}</text>`,
+      `<line x1="56" y1="${y + 58}" x2="844" y2="${y + 58}" stroke="#f0f2f0" stroke-width="2"/>`,
+    );
+  });
+  let summaryY = itemTop + transaction.items.length * itemHeight + 12;
+  if (transaction.tableNumber) {
+    lines.push(`<text x="56" y="${summaryY}" fill="#68736d" font-family="Arial,sans-serif" font-size="18">Meja: ${escapeSvgText(transaction.tableNumber)}</text>`);
+    summaryY += 36;
+  }
+  if (transaction.specialNotes) {
+    const notes = `Catatan: ${transaction.specialNotes}`;
+    const notesFit = notes.length > 58 ? 'textLength="788" lengthAdjust="spacingAndGlyphs"' : '';
+    lines.push(`<text x="56" y="${summaryY}" fill="#68736d" font-family="Arial,sans-serif" font-size="18" ${notesFit}>${escapeSvgText(notes)}</text>`);
+    summaryY += 48;
+  }
+  lines.push(
+    `<text x="56" y="${summaryY + 20}" fill="#758078" font-family="Arial,sans-serif" font-size="18">TOTAL PEMBAYARAN</text>`,
+    `<text x="844" y="${summaryY + 26}" fill="${accentColor}" font-family="Arial,sans-serif" font-size="30" font-weight="700" text-anchor="end">${escapeSvgText(rupiah(transaction.total))}</text>`,
+    `<text x="56" y="${summaryY + 68}" fill="#68736d" font-family="Arial,sans-serif" font-size="18">Pembayaran: ${escapeSvgText(`${transaction.paymentStatus} (${transaction.paymentMethod})`)}</text>`,
+    `<text x="450" y="${height - 50}" fill="#758078" font-family="Arial,sans-serif" font-size="17" text-anchor="middle">${escapeSvgText(receiptFooter || 'Terima kasih atas kepercayaan Anda.')}</text>`,
+    '</svg>',
+  );
+  return { svg: lines.join(''), width, height };
+}
+
+function createPosReceiptPng(transaction, businessName, receiptSettings = defaultThemeSettings.receiptSettings) {
+  const { svg, width, height } = createPosReceiptSvg(transaction, businessName, receiptSettings);
+  const svgUrl = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    const finish = (error, blob) => {
+      URL.revokeObjectURL(svgUrl);
+      if (error) reject(error);
+      else resolve(blob);
+    };
+    image.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext('2d');
+      if (!context) {
+        finish(new Error('Browser tidak dapat membuat gambar nota.'));
+        return;
+      }
+      context.drawImage(image, 0, 0, width, height);
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          finish(new Error('Gambar nota tidak dapat disiapkan.'));
+          return;
+        }
+        finish(null, blob);
+      }, 'image/png');
+    };
+    image.onerror = () => finish(new Error('Nota tidak dapat dirender menjadi gambar.'));
+    image.src = svgUrl;
+  });
+}
+
+function downloadPosReceipt(blob, receiptNumber) {
+  const imageUrl = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = imageUrl;
+  link.download = `${receiptNumber}.png`;
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(imageUrl), 1000);
 }
 
 async function getApiError(response, fallback) {
@@ -910,6 +1048,7 @@ function App() {
   const [supportSubject, setSupportSubject] = useState('Bagaimana cara mendaftarkan usaha?');
   const [supportDraft, setSupportDraft] = useState('');
   const [supportTickets, setSupportTickets] = useState([]);
+  const [supportUnreadTickets, setSupportUnreadTickets] = useState([]);
   const [supportActiveTicket, setSupportActiveTicket] = useState(null);
   const [supportMessages, setSupportMessages] = useState([]);
   const [supportStartNew, setSupportStartNew] = useState(false);
@@ -1037,6 +1176,10 @@ function App() {
   const amountPaid = Number(posAmountPaid) || 0;
   const changeDue = Math.max(0, amountPaid - cartTotal);
   const unreadBillingNotifications = billingData?.notifications?.filter((item) => !item.read_at) ?? [];
+  const unreadSupportMessageCount = supportUnreadTickets.reduce(
+    (total, ticket) => total + (Number(ticket.unread_owner_count) || 0),
+    0,
+  );
   const financeSummary = financeEntries.reduce((summary, entry) => {
     summary[entry.type] += Number(entry.amount);
     return summary;
@@ -1108,12 +1251,25 @@ function App() {
     setSupportTickets(result.tickets);
   };
 
+  const markSupportTicketRead = async (ticketId, email) => {
+    if (!isAuthenticated) return;
+    const response = await fetch(`/api/support/tickets/${ticketId}/read`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.message || 'Notifikasi bantuan tidak dapat diperbarui.');
+    setSupportUnreadTickets((current) => current.filter((ticket) => ticket.id !== ticketId));
+  };
+
   const loadSupportConversation = async (ticketId, email) => {
     const response = await fetch(`/api/support/tickets/${ticketId}?email=${encodeURIComponent(email)}`);
     const result = await response.json();
     if (!response.ok) throw new Error(result.message || 'Percakapan tidak dapat dimuat.');
     setSupportActiveTicket(result.ticket);
     setSupportMessages(result.messages);
+    await markSupportTicketRead(ticketId, email);
   };
 
   const sendSupportMessage = async (event) => {
@@ -1470,22 +1626,45 @@ function App() {
   const getWhatsAppReceiptUrl = (transaction) => {
     const phone = normalizeWhatsAppNumber(transaction.whatsapp || '');
     if (phone.length < 10 || phone.length > 15) return '';
-    const itemLines = transaction.items
-      .map((item) => `- ${item.name}: ${item.quantity} ${item.unit} x ${rupiah(item.price)} = ${rupiah(item.quantity * item.price)}`)
-      .join('\n');
-    const message = [
-      `Halo ${transaction.customer}, terima kasih telah bertransaksi di ${workspaceName}.`,
-      '',
-      `Nota: ${transaction.receiptNumber}`,
-      ...(transaction.tableNumber ? [`Meja: ${transaction.tableNumber}`] : []),
-      itemLines,
-      ...(transaction.specialNotes ? [`Catatan khusus: ${transaction.specialNotes}`] : []),
-      `Total: ${rupiah(transaction.total)}`,
-      `Pembayaran: ${transaction.paymentStatus} (${transaction.paymentMethod})`,
-      '',
-      'Terima kasih atas kepercayaan Anda.',
-    ].join('\n');
-    return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+    const message = `Halo ${transaction.customer}, berikut nota asli ${transaction.receiptNumber} dari ${workspaceName}.`;
+    return `https://web.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(message)}`;
+  };
+
+  const sharePosReceipt = async (transaction) => {
+    const whatsappUrl = getWhatsAppReceiptUrl(transaction);
+    if (!whatsappUrl) {
+      setNotice('Nomor WhatsApp tidak valid; nota belum dapat dibagikan.');
+      return;
+    }
+
+    let chatOpened = false;
+    try {
+      chatOpened = Boolean(window.open(whatsappUrl, '_blank'));
+    } catch {
+      chatOpened = false;
+    }
+
+    let preparationMessage;
+    try {
+      const image = createPosReceiptPng(transaction, workspaceName, receiptSettings);
+      if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
+        try {
+          await navigator.clipboard.write([new ClipboardItem({ 'image/png': image })]);
+          preparationMessage = 'Nota asli disalin sebagai gambar. Di WhatsApp Web, tekan Ctrl+V pada chat pelanggan, lalu tekan Kirim.';
+        } catch {
+          downloadPosReceipt(await image, transaction.receiptNumber);
+          preparationMessage = 'Nota asli diunduh. Lampirkan file PNG tersebut pada chat pelanggan di WhatsApp Web, lalu tekan Kirim.';
+        }
+      } else {
+        downloadPosReceipt(await image, transaction.receiptNumber);
+        preparationMessage = 'Nota asli diunduh. Lampirkan file PNG tersebut pada chat pelanggan di WhatsApp Web, lalu tekan Kirim.';
+      }
+    } catch (error) {
+      preparationMessage = `Nota tidak dapat disiapkan: ${error.message}`;
+    }
+    setNotice(chatOpened
+      ? preparationMessage
+      : `${preparationMessage} Pop-up WhatsApp diblokir; izinkan pop-up lalu coba lagi.`);
   };
 
   const getMotorReceiptWhatsappUrl = (receipt) => {
@@ -1763,7 +1942,10 @@ function App() {
   };
 
   const editUserAccess = (user) => {
-    setAccessDraft({ ...user, permissions: [...user.permissions] });
+    setAccessDraft({
+      ...user,
+      permissions: filterPermissionsForBusiness(user.permissions, businessType, workspaceModules),
+    });
   };
 
   const saveUserAccess = () => {
@@ -1776,12 +1958,17 @@ function App() {
       setNotice('Hanya Owner yang dapat menetapkan peran Super Admin.');
       return;
     }
+    const businessPermissions = filterPermissionsForBusiness(
+      accessDraft.permissions,
+      businessType,
+      workspaceModules,
+    );
     const savedAccessDraft = accessDraft.role === 'SUPER ADMIN'
       ? {
         ...accessDraft,
-        permissions: accessDraft.permissions.filter((permission) => !superAdminRestrictedPermissions.includes(permission)),
+        permissions: businessPermissions.filter((permission) => !superAdminRestrictedPermissions.includes(permission)),
       }
-      : accessDraft;
+      : { ...accessDraft, permissions: businessPermissions };
     setUsers((current) => current.map((user) => (
       user.id === accessDraft.id ? savedAccessDraft : user
     )));
@@ -1955,11 +2142,17 @@ function App() {
 
   const activeUser = users.find((user) => user.id === activeUserId) ?? users[0];
   const role = activeUser.role;
-  const openSupport = () => {
+  const openSupport = (ticketId = null) => {
     setSupportName(activeUser.name || '');
     setSupportEmail(activeUser.email || '');
-    setSupportActiveTicket(null);
-    setSupportMessages([]);
+    if (ticketId) {
+      setSupportStartNew(false);
+      loadSupportConversation(ticketId, activeUser.email || supportEmail)
+        .catch((error) => setSupportError(error.message));
+    } else {
+      setSupportActiveTicket(null);
+      setSupportMessages([]);
+    }
     setSupportStartNew(false);
     setSupportError('');
     setSupportNotice('');
@@ -1972,6 +2165,26 @@ function App() {
     : null;
   const ownerTrialCountdown = ownerTrialEnd ? getCountdown(ownerTrialEnd, countdownNow) : null;
   const activeThemeColors = getThemeColors(themeSettings);
+  const receiptSettings = themeSettings.receiptSettings || defaultThemeSettings.receiptSettings;
+  const activeReceiptAccent = receiptAccents.find(({ id }) => id === receiptSettings.accent) || receiptAccents[0];
+  const availableAccessModules = accessModules.filter(({ id }) => (
+    !platformAccessPermissions.has(id)
+    && isPermissionAvailableForBusiness(id, businessType, workspaceModules)
+  ));
+  const sampleReceiptItems = priceItems.slice(0, 2).map((item) => ({
+    ...item,
+    quantity: businessType === 'laundry' ? 2 : 1,
+  }));
+  const sampleReceiptTotal = sampleReceiptItems.reduce((total, item) => total + item.price * item.quantity, 0);
+  const sampleReceiptImage = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(createPosReceiptSvg({
+    receiptNumber: 'POS-20261123-0001',
+    customer: 'Ani',
+    createdAt: '2026-11-23T09:44:00.000Z',
+    items: sampleReceiptItems,
+    total: sampleReceiptTotal,
+    paymentStatus: 'LUNAS',
+    paymentMethod: 'Tunai',
+  }, workspaceName, receiptSettings).svg)}`;
   const canApproveSpk = businessType === 'dealer_motor'
     && workspaceModules.includes('sales_orders')
     && activeUser.permissions.includes('spkApprove');
@@ -2011,7 +2224,7 @@ function App() {
   )).filter(([label]) => label !== 'Aktivasi' || activeUser.role === 'OWNER')
     .filter(([label]) => !billingData?.business?.subscription
     || billingData.business.subscription.status !== 'expired'
-    || ['Aktivasi', 'Dashboard', 'Profil Usaha'].includes(label));
+    || ['Aktivasi', 'Dashboard', 'Profil Usaha', 'Pengaturan Nota'].includes(label));
   const menuSections = [
     { title: 'UTAMA', labels: ['Dashboard'] },
     { title: 'OPERASIONAL', labels: ['Kasir', 'Menu Digital', 'Pesanan', 'Daftar Harga', 'Transaksi', 'Nota Digital', 'Aktivasi', 'Input SPK', 'SPK', 'Semua SPK', 'SPK Saya', 'Pengajuan', 'Follow Up', 'Verifikasi SPK', 'Approval', 'Pengiriman'] },
@@ -2020,7 +2233,7 @@ function App() {
     { title: 'KARYAWAN', labels: ['Absensi'] },
     { title: 'LAPORAN', labels: ['Laporan Penjualan', 'Performance', 'Target'] },
     { title: 'PLATFORM', labels: ['Semua Usaha', 'Pusat Bantuan'] },
-    { title: 'PENGATURAN', labels: ['Profil Usaha', 'Struktur Workspace', 'Tampilan Dashboard'] },
+    { title: 'PENGATURAN', labels: ['Profil Usaha', 'Struktur Workspace', 'Tampilan Dashboard', 'Pengaturan Nota'] },
   ].map((section) => ({
     ...section,
     items: menus.filter(([label]) => section.labels.includes(label)),
@@ -2047,6 +2260,35 @@ function App() {
       cancelled = true;
     };
   }, [activePage, activeUser.role, helpOpen]);
+
+  useEffect(() => {
+    if (!isAuthenticated || activeUser.role === 'PLATFORM_OWNER') {
+      setSupportUnreadTickets([]);
+      return undefined;
+    }
+    const email = String(supportEmail || activeUser.email || '').trim().toLowerCase();
+    if (!email) return undefined;
+    let cancelled = false;
+    const refreshSupportNotifications = async () => {
+      try {
+        const response = await fetch(`/api/support/tickets?email=${encodeURIComponent(email)}`);
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message || 'Notifikasi bantuan tidak dapat dimuat.');
+        if (cancelled) return;
+        const unreadTickets = result.tickets.filter((ticket) => Number(ticket.unread_owner_count) > 0
+          && !(activePage === 'Pusat Bantuan' && ticket.id === supportActiveTicket?.id));
+        setSupportUnreadTickets(unreadTickets);
+      } catch (error) {
+        if (!cancelled && (helpOpen || activePage === 'Pusat Bantuan')) setSupportError(error.message);
+      }
+    };
+    refreshSupportNotifications();
+    const timer = window.setInterval(refreshSupportNotifications, 10000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [activePage, activeUser.email, activeUser.role, helpOpen, isAuthenticated, supportActiveTicket?.id, supportEmail]);
 
   useEffect(() => {
     if (activePage !== 'Pusat Bantuan' || activeUser.role === 'PLATFORM_OWNER'
@@ -2081,6 +2323,9 @@ function App() {
         if (!cancelled) {
           setSupportActiveTicket(result.ticket);
           setSupportMessages(result.messages);
+          if (isAuthenticated && Number(selectedTicket.unread_owner_count) > 0) {
+            await markSupportTicketRead(selectedTicket.id, email);
+          }
         }
       } catch (error) {
         if (!cancelled) setSupportError(error.message);
@@ -2092,7 +2337,7 @@ function App() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [activePage, activeUser.email, activeUser.name, activeUser.role, supportActiveTicket?.id, supportEmail, supportStartNew, supportName]);
+  }, [activePage, activeUser.email, activeUser.name, activeUser.role, isAuthenticated, supportActiveTicket?.id, supportEmail, supportStartNew, supportName]);
 
   useEffect(() => {
     const pageIsAllowed = activePage === 'Dashboard'
@@ -2175,9 +2420,11 @@ function App() {
         if (!cancelled) {
           setUsers(result.users.map((user) => ({
             ...user,
-            permissions: Array.isArray(user.permissions)
-              ? user.permissions
-              : rolePermissions[user.role] ?? [],
+            permissions: filterPermissionsForBusiness(
+              Array.isArray(user.permissions) ? user.permissions : rolePermissions[user.role] ?? [],
+              businessType,
+              workspaceModules,
+            ),
           })));
         }
       } catch (error) {
@@ -2188,7 +2435,7 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [activeUser.role, isAuthenticated, demoMode]);
+  }, [activeUser.role, businessType, isAuthenticated, demoMode, workspaceModules]);
   useEffect(() => {
     if (!isAuthenticated || needsBusinessSetup) return undefined;
     let cancelled = false;
@@ -2210,9 +2457,9 @@ function App() {
         }
         else if (activeUser.role === 'OWNER') {
           setBillingData(data);
-          setThemeSettings(normalizeThemeSettings(data.business.themeSettings));
+          setThemeSettings(normalizeThemeSettings(data.business.themeSettings, data.business.type));
         } else {
-          setThemeSettings(normalizeThemeSettings(data.themeSettings));
+          setThemeSettings(normalizeThemeSettings(data.themeSettings, data.businessType));
         }
         setBillingError('');
       } catch (error) {
@@ -2606,17 +2853,20 @@ function App() {
     }
   };
 
-  const saveTheme = async () => {
+  const saveTheme = async (
+    successMessage = 'Tampilan dashboard berhasil disimpan untuk perusahaan ini.',
+    previewSuccessMessage = 'Tema pratinjau tersimpan pada browser ini.',
+  ) => {
     setThemeError('');
     setThemeNotice('');
     if (!isAuthenticated) {
       if (!demoMode) {
-        setThemeError('Masuk ke workspace untuk menyimpan tampilan dashboard.');
+        setThemeError('Masuk ke workspace untuk menyimpan pengaturan.');
         return;
       }
       try {
         localStorage.setItem('ku-demo-theme:dealer_motor', JSON.stringify(themeSettings));
-        setThemeNotice('Tema pratinjau tersimpan pada browser ini.');
+        setThemeNotice(previewSuccessMessage);
       } catch {
         setThemeError('Pengaturan pratinjau tidak dapat disimpan di browser ini.');
       }
@@ -2632,7 +2882,7 @@ function App() {
       if (!response.ok) throw new Error(await getApiError(response, 'Pengaturan tema tidak dapat disimpan.'));
       const result = await response.json();
       setThemeSettings(result.themeSettings);
-      setThemeNotice('Tampilan dashboard berhasil disimpan untuk perusahaan ini.');
+      setThemeNotice(successMessage);
     } catch (error) {
       setThemeError(error.message);
     } finally {
@@ -3100,6 +3350,82 @@ function App() {
             </section>
             <div className="theme-save-row"><span>Pengaturan tersimpan terpisah untuk setiap perusahaan.</span><button className="button button-primary" disabled={themeSaving} onClick={saveTheme} type="button">{themeSaving ? 'Menyimpan…' : 'Simpan tampilan'} <span>→</span></button></div>
           </section>
+        ) : activePage === 'Pengaturan Nota' ? (
+          <section className="content theme-settings-page receipt-settings-page">
+            <div className="page-heading"><div><div className="eyebrow">PENGATURAN <span>/</span> NOTA DIGITAL</div><h1>Studio Nota</h1><p>Atur tampilan nota untuk workspace {workspaceName} · {businessTypes[businessType]?.label || 'Usaha'}.</p></div></div>
+            {themeNotice && <div className="notice" role="status">{themeNotice}</div>}
+            {themeError && <div className="notice error-notice" role="alert">{themeError}</div>}
+            {demoMode && <div className="notice">Pratinjau demo — pengaturan nota disimpan lokal dan tidak mengubah data perusahaan.</div>}
+            <div className="receipt-setup-grid">
+              <section className="theme-settings-card receipt-setup-controls">
+                <div className="table-heading"><div><h2>Gaya nota</h2><p>Pilih format yang cocok dengan cara usaha Anda melayani pelanggan.</p></div></div>
+                <div className="receipt-mode-options">
+                  {receiptModes.map((mode) => <button
+                    aria-pressed={receiptSettings.mode === mode.id}
+                    className={`receipt-mode-option ${receiptSettings.mode === mode.id ? 'selected' : ''}`}
+                    key={mode.id}
+                    onClick={() => setThemeSettings((current) => ({
+                      ...current,
+                      receiptSettings: { ...current.receiptSettings, mode: mode.id },
+                    }))}
+                    type="button"
+                  >
+                    <strong>{mode.name}</strong><small>{mode.description}</small>
+                  </button>)}
+                </div>
+                <div className="receipt-accent-section">
+                  <strong>Warna aksen</strong>
+                  <div className="receipt-accent-options">
+                    {receiptAccents.map((accent) => <button
+                      aria-label={`Pilih warna nota ${accent.name}`}
+                      aria-pressed={receiptSettings.accent === accent.id}
+                      className={`receipt-accent-option ${receiptSettings.accent === accent.id ? 'selected' : ''}`}
+                      key={accent.id}
+                      onClick={() => setThemeSettings((current) => ({
+                        ...current,
+                        receiptSettings: { ...current.receiptSettings, accent: accent.id },
+                      }))}
+                      style={{ '--receipt-accent': accent.color, '--receipt-accent-background': accent.background }}
+                      type="button"
+                    >
+                      <i /><span>{accent.name}</span>
+                    </button>)}
+                  </div>
+                </div>
+                <label className="field"><span>Alamat / kontak pada nota</span><input
+                  maxLength="240"
+                  onChange={(event) => setThemeSettings((current) => ({
+                    ...current,
+                    receiptSettings: { ...current.receiptSettings, storeAddress: event.target.value },
+                  }))}
+                  placeholder="Contoh: Jl. Melati Raya No. 18 · WA 0812..."
+                  value={receiptSettings.storeAddress}
+                /></label>
+                <label className="field"><span>Catatan kaki nota</span><textarea
+                  maxLength="240"
+                  onChange={(event) => setThemeSettings((current) => ({
+                    ...current,
+                    receiptSettings: { ...current.receiptSettings, footerNote: event.target.value },
+                  }))}
+                  value={receiptSettings.footerNote}
+                /></label>
+              </section>
+              <section className="theme-settings-card receipt-preview-card">
+                <div className="table-heading"><div><h2>Pratinjau langsung</h2><p>Contoh nota sesuai jenis usaha dan pilihan Anda.</p></div></div>
+                <div className="receipt-preview-stage">
+                  <img
+                    alt={`Pratinjau nota ${businessTypes[businessType]?.label || 'usaha'}`}
+                    src={sampleReceiptImage}
+                  />
+                </div>
+                <div className="receipt-preview-meta">
+                  <span>{receiptModes.find(({ id }) => id === receiptSettings.mode)?.name}</span>
+                  <span><i style={{ background: activeReceiptAccent.color }} />{activeReceiptAccent.name}</span>
+                </div>
+              </section>
+            </div>
+            <div className="theme-save-row"><span>Pengaturan ini hanya berlaku untuk usaha {workspaceName}.</span><button className="button button-primary" disabled={themeSaving} onClick={() => saveTheme('Pengaturan nota berhasil disimpan untuk perusahaan ini.', 'Pengaturan nota pratinjau tersimpan pada browser ini.')} type="button">{themeSaving ? 'Menyimpan…' : 'Simpan pengaturan nota'} <span>→</span></button></div>
+          </section>
         ) : activePage === 'Menu Digital' ? (
           <section className="content pos-page">
             <div className="page-heading"><div><div className="eyebrow">RESTORAN / KAFE <span>/</span> MENU</div><h1>Menu Digital</h1><p>Pelanggan memilih menu, mengisi identitas dan nomor meja, lalu pesanan masuk ke antrean kasir.</p></div></div>
@@ -3299,17 +3625,23 @@ function App() {
                     : <p className="receipt-warning" role="status">Nomor WhatsApp tidak valid; kwitansi belum dapat dibagikan.</p>}
                 </div>
               </article>)}
-              {posTransactions.map((transaction) => <article className="pos-receipt" data-printing={printingReceipt === transaction.receiptNumber} key={transaction.receiptNumber}>
-                <div className="receipt-heading"><div><span className="receipt-status">{transaction.paymentStatus}</span><h2>{workspaceName}</h2><p>No. Nota: {transaction.receiptNumber}</p></div><span className="receipt-mark">KU</span></div>
+              {posTransactions.map((transaction) => <article
+                className="pos-receipt"
+                data-printing={printingReceipt === transaction.receiptNumber}
+                data-receipt-mode={receiptSettings.mode}
+                key={transaction.receiptNumber}
+                style={{ '--receipt-accent': activeReceiptAccent.color, '--receipt-accent-background': activeReceiptAccent.background }}
+              >
+                <div className="receipt-heading"><div><span className="receipt-status">{transaction.paymentStatus}</span><h2>{workspaceName}</h2>{receiptSettings.storeAddress && <p className="receipt-business-address">{receiptSettings.storeAddress}</p>}<p>No. Nota: {transaction.receiptNumber}</p></div><span className="receipt-mark">KU</span></div>
                 <div className="receipt-customer"><span>Pelanggan</span><strong>{transaction.customer}</strong>{transaction.tableNumber && <small>Meja {transaction.tableNumber} · {transaction.paymentTiming}</small>}<small>{new Intl.DateTimeFormat('id-ID', { dateStyle: 'long', timeStyle: 'short' }).format(new Date(transaction.createdAt))}</small></div>
                 <div className="receipt-lines">{transaction.items.map((item) => <div className="receipt-line" key={item.id}><span>{item.name}<small>{item.quantity} {item.unit} × {rupiah(item.price)}</small></span><strong>{rupiah(item.quantity * item.price)}</strong></div>)}</div>
                 <div className="receipt-total"><span>Total pembayaran</span><strong>{rupiah(transaction.total)}</strong></div>
                 {transaction.specialNotes && <p className="receipt-special-notes"><strong>Catatan:</strong> {transaction.specialNotes}</p>}
-                <p className="receipt-thanks">Terima kasih telah mempercayakan kebutuhan Anda kepada kami.</p>
+                <p className="receipt-thanks">{receiptSettings.footerNote}</p>
                 <div className="receipt-actions">
                   <button className="button button-quiet receipt-print" onClick={() => printPosReceipt(transaction.receiptNumber)} type="button">Cetak nota</button>
                   {getWhatsAppReceiptUrl(transaction)
-                    ? <a className="button button-primary receipt-share" href={getWhatsAppReceiptUrl(transaction)} rel="noreferrer" target="_blank">Bagikan nota via WhatsApp <span>→</span></a>
+                    ? <button className="button button-primary receipt-share" onClick={() => sharePosReceipt(transaction)} type="button">Kirim nota asli via WhatsApp <span>→</span></button>
                     : <p className="receipt-warning" role="status">Nomor WhatsApp tidak valid; nota belum dapat dibagikan.</p>}
                 </div>
               </article>)}
@@ -3448,7 +3780,7 @@ function App() {
         ) : activePage === 'Pengelolaan Akses' ? (
           <section className="content">
             <div className="page-heading access-heading">
-              <div><div className="eyebrow">ADMINISTRASI <span>/</span> KEAMANAN</div><h1>Pengelolaan Akses</h1><p>Atur hak akses secara individual untuk setiap pengguna Dealer WAM.</p></div>
+              <div><div className="eyebrow">ADMINISTRASI <span>/</span> KEAMANAN</div><h1>Pengelolaan Akses</h1><p>Atur hak akses pengguna {workspaceName}. Pilihan mengikuti jenis usaha dan modul aktif pada setup workspace.</p></div>
             </div>
             {notice && <div className="notice" role="status">{notice}</div>}
             <div className="access-summary">
@@ -3478,8 +3810,11 @@ function App() {
                     <label className="field"><span>Peran pengguna</span><select onChange={(event) => setAccessDraft((current) => ({ ...current, role: event.target.value }))} value={accessDraft.role}>{(activeUser.role === 'OWNER' ? ['SUPER ADMIN', 'HRD', 'SVP', 'SPV', 'KEPALA TOKO', 'ADMIN', 'SALES', 'KASIR', 'DRIVER'] : ['HRD', 'SVP', 'SPV', 'KEPALA TOKO', 'ADMIN', 'SALES', 'KASIR', 'DRIVER', ...(accessDraft.role === 'SUPER ADMIN' ? ['SUPER ADMIN'] : [])]).map((item) => <option key={item}>{item}</option>)}</select></label>
                     <label className="access-active-control"><span><strong>Akun aktif</strong><small>Pengguna dapat mengakses sistem</small></span><input checked={accessDraft.active} onChange={(event) => setAccessDraft((current) => ({ ...current, active: event.target.checked }))} type="checkbox" /><span className="switch-track" /></label>
                   </div>
-                  <div className="permission-heading"><div><h3>Hak akses individual</h3><p>Pilih modul yang boleh diakses pengguna ini.</p></div><button className="reset-permissions" onClick={() => setAccessDraft((current) => ({ ...current, permissions: [...rolePermissions[current.role]] }))} type="button">Gunakan akses standar {accessDraft.role}</button></div>
-                  <div className="permission-list">{accessModules.map((module) => <label className="permission-row" key={module.id}>
+                  <div className="permission-heading"><div><h3>Hak akses individual</h3><p>Hanya menampilkan hak akses yang sesuai dengan modul aktif pada usaha {businessTypes[businessType]?.label || 'ini'}.</p></div><button className="reset-permissions" onClick={() => setAccessDraft((current) => ({
+                    ...current,
+                    permissions: filterPermissionsForBusiness(rolePermissions[current.role] || [], businessType, workspaceModules),
+                  }))} type="button">Gunakan akses standar {accessDraft.role}</button></div>
+                  <div className="permission-list">{availableAccessModules.map((module) => <label className="permission-row" key={module.id}>
                     <span><strong>{module.label}</strong><small>{module.group}</small></span>
                     <input checked={accessDraft.permissions.includes(module.id)} disabled={accessDraft.role === 'SUPER ADMIN' && superAdminRestrictedPermissions.includes(module.id)} onChange={() => togglePermission(module.id)} type="checkbox" />
                     <span className="switch-track" />
@@ -3632,14 +3967,27 @@ function App() {
         {helpOpen && <div aria-label="Opsi bantuan" className="help-popover" id="help-popover" role="dialog">
           <button aria-label="Tutup bantuan" className="help-popover-close" onClick={() => setHelpOpen(false)} type="button">×</button>
           <strong>Butuh bantuan?</strong>
+          {supportUnreadTickets.length > 0 && <section aria-label="Balasan bantuan yang belum dibaca" className="support-reply-notifications">
+            <strong>Balasan baru ({unreadSupportMessageCount})</strong>
+            {supportUnreadTickets.slice(0, 3).map((ticket) => <button
+              className="support-reply-notification"
+              key={ticket.id}
+              onClick={() => openSupport(ticket.id)}
+              type="button"
+            >
+              <span>{ticket.ticket_number} · {ticket.subject}</span>
+              <small>{ticket.latest_owner_message || 'Tim KelolaUsaha membalas percakapan Anda.'}</small>
+            </button>)}
+          </section>}
+          {supportError && <p className="support-notification-error" role="alert">{supportError}</p>}
           <p>Operator kami siap membantu. Pesan dikirim melalui email.</p>
-          <button className="help-popover-action" onClick={openSupport} type="button">Pusat bantuan <span aria-hidden="true">→</span></button>
+          <button className="help-popover-action" onClick={() => openSupport()} type="button">Pusat bantuan <span aria-hidden="true">→</span></button>
           {supportContactEmail && <a className="help-popover-email" href={`mailto:${supportContactEmail}?subject=${encodeURIComponent('Bantuan KelolaUsaha.store')}`}>Email langsung ↗</a>}
         </div>}
         <button
           aria-controls="help-popover"
           aria-expanded={helpOpen}
-          aria-label={helpOpen ? 'Tutup bantuan' : 'Buka bantuan'}
+          aria-label={helpOpen ? 'Tutup bantuan' : `Buka bantuan${unreadSupportMessageCount ? `, ${unreadSupportMessageCount} balasan baru` : ''}`}
           className="support-floating-pill"
           onClick={() => setHelpOpen((current) => !current)}
           type="button"
@@ -3658,8 +4006,11 @@ function App() {
               <circle cx="32" cy="37" fill="#bd2635" r="1.7" />
             </svg>
           </span>
-          <span className="support-floating-copy"><strong>Operator bantuan</strong><small>Siap membantu</small></span>
+          <span className="support-floating-copy"><strong>Operator bantuan</strong><small>{unreadSupportMessageCount ? `${unreadSupportMessageCount} balasan baru` : 'Siap membantu'}</small></span>
           <span aria-hidden="true" className="support-floating-chevron">{helpOpen ? '×' : '?'}</span>
+          {unreadSupportMessageCount > 0 && <span aria-hidden="true" className="support-notification-badge">
+            {unreadSupportMessageCount > 9 ? '9+' : unreadSupportMessageCount}
+          </span>}
         </button>
       </aside>
       {accountProfileOpen && <div className="access-modal-backdrop" onMouseDown={(event) => {
@@ -3697,4 +4048,5 @@ function App() {
   );
 }
 
+export { createPosReceiptSvg };
 export default App;

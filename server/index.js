@@ -10,7 +10,11 @@ import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
 import pg from 'pg';
 import { fileTypeFromBuffer } from 'file-type';
-import { businessTypes, businessTypeIds } from '../shared/business-modules.js';
+import {
+  businessTypes,
+  businessTypeIds,
+  filterPermissionsForBusiness,
+} from '../shared/business-modules.js';
 import { createDealerMotorRouter } from './dealer-motor.js';
 import { midtransFailureMessage, resolveMidtransEnvironment, verifyNotificationSignature } from './midtrans.js';
 import { createOperationsRouter, createPublicOperationsRouter } from './operations.js';
@@ -47,6 +51,7 @@ const permissionSets = {
   KASIR: ['dashboard', 'posAccess', 'priceManage', 'transactionsView', 'receiptsView', 'attendanceView'],
   DRIVER: ['dashboard', 'deliveryManage', 'attendanceView'],
   PLATFORM_OWNER: ['dashboard', 'platformBusinesses', 'platformBilling'],
+  'Customer': ['dashboard', 'spkCreate', 'spkViewAll', 'spkVerify', 'customerManage', 'salesManage', 'unitManage', 'leasingManage', 'posAccess', 'priceManage', 'transactionsView', 'receiptsView', 'attendanceView']
 };
 
 function hash(value) {
@@ -201,7 +206,14 @@ async function authenticate(req, res, next) {
       [hash(token)],
     );
     if (!result.rowCount) return res.status(401).json({ message: 'Sesi telah berakhir. Silakan masuk kembali.' });
-    req.user = result.rows[0];
+    req.user = {
+      ...result.rows[0],
+      permissions: filterPermissionsForBusiness(
+        result.rows[0].permissions,
+        result.rows[0].business_type,
+        result.rows[0].modules,
+      ),
+    };
     const tenantSlug = await requestTenantSlug(req);
     if (tenantSlug && req.user.company_slug !== tenantSlug) {
       return res.status(403).json({ message: 'Akun ini tidak terdaftar pada workspace usaha tersebut.' });
@@ -276,8 +288,32 @@ async function sendOtpEmail(email, otp) {
   await transport.sendMail({
     from: process.env.SMTP_FROM || smtpUser,
     to: email,
-    subject: 'Kode masuk KelolaUsaha.store',
-    text: `Kode OTP Anda: ${otp}. Kode berlaku 10 menit dan jangan dibagikan.`,
+    subject: `Kode Verifikasi Keamanan Anda: ${otp}`,
+    text: `Yth. Pengguna,
+
+Kami menerima permintaan verifikasi keamanan untuk akun Anda. Silakan masukkan kode One-Time Password (OTP) di bawah ini pada halaman verifikasi untuk melanjutkan:
+
+${otp}
+
+Informasi Penting:
+- Masa Berlaku: Kode ini hanya berlaku selama 10 menit sejak pesan ini dikirimkan.
+- Kerahasiaan: Kode OTP bersifat pribadi dan rahasia. Jangan berikan kode ini kepada siapa pun, termasuk staf atau pihak yang mengaku sebagai perwakilan resmi kami.
+- Keamanan Akun: Apabila Anda tidak merasa mengajukan permintaan verifikasi ini, segera abaikan email ini dan disarankan untuk mengganti kata sandi akun Anda demi keamanan.
+
+Hormat kami,
+Tim Keamanan & Layanan Pelanggan`,
+    html: `<div style="font-family:Arial,sans-serif;color:#26352e;line-height:1.6;max-width:600px;margin:0 auto">
+      <p>Yth. Pengguna,</p>
+      <p>Kami menerima permintaan verifikasi keamanan untuk akun Anda. Silakan masukkan kode <em>One-Time Password</em> (OTP) di bawah ini pada halaman verifikasi untuk melanjutkan:</p>
+      <p style="font-size:30px;font-weight:700;letter-spacing:6px;color:#b42332">${otp}</p>
+      <p><strong>Informasi Penting:</strong></p>
+      <ul>
+        <li><strong>Masa Berlaku:</strong> Kode ini hanya berlaku selama <strong>10 menit</strong> sejak pesan ini dikirimkan.</li>
+        <li><strong>Kerahasiaan:</strong> Kode OTP bersifat pribadi dan rahasia. Jangan berikan kode ini kepada siapa pun, termasuk staf atau pihak yang mengaku sebagai perwakilan resmi kami.</li>
+        <li><strong>Keamanan Akun:</strong> Apabila Anda tidak merasa mengajukan permintaan verifikasi ini, segera abaikan email ini dan disarankan untuk mengganti kata sandi akun Anda demi keamanan.</li>
+      </ul>
+      <p>Hormat kami,<br><strong>Tim Keamanan &amp; Layanan Pelanggan</strong></p>
+    </div>`,
   });
 }
 
@@ -846,7 +882,16 @@ app.get('/api/team/members', authenticate, requireRole('OWNER', 'SUPER ADMIN'), 
        ORDER BY CASE WHEN approval_status = 'pending' THEN 0 ELSE 1 END, created_at DESC`,
       [req.user.company_id],
     );
-    res.json({ users: result.rows });
+    res.json({
+      users: result.rows.map((user) => ({
+        ...user,
+        permissions: filterPermissionsForBusiness(
+          user.permissions,
+          req.user.business_type,
+          req.user.modules,
+        ),
+      })),
+    });
   } catch (error) {
     next(error);
   }
@@ -880,11 +925,15 @@ app.patch('/api/team/members/:id/approval', authenticate, requireRole('OWNER', '
 app.get('/api/workspace/theme', authenticate, requireTenant, async (req, res, next) => {
   try {
     const result = await pool.query(
-      'SELECT theme_settings FROM companies WHERE id = $1',
+      'SELECT theme_settings, business_type, modules FROM companies WHERE id = $1',
       [req.user.company_id],
     );
     if (!result.rowCount) return res.status(404).json({ message: 'Workspace tidak ditemukan.' });
-    res.json({ themeSettings: result.rows[0].theme_settings });
+    res.json({
+      themeSettings: result.rows[0].theme_settings,
+      businessType: result.rows[0].business_type,
+      modules: result.rows[0].modules,
+    });
   } catch (error) {
     next(error);
   }
@@ -996,11 +1045,32 @@ app.put('/api/workspace/theme', authenticate, requireRole('SUPER ADMIN', 'OWNER'
   } = req.body;
   const qrisUrl = typeof req.body?.qrisUrl === 'string' ? req.body.qrisUrl.trim() : undefined;
   const hasQrisUrl = Object.prototype.hasOwnProperty.call(req.body || {}, 'qrisUrl');
+  const hasReceiptSettings = Object.prototype.hasOwnProperty.call(req.body || {}, 'receiptSettings');
+  const receiptSettings = req.body?.receiptSettings;
   const validColor = (value) => value === '' || /^#[0-9a-f]{6}$/i.test(value);
   const validAsset = (value) => !value
     || (value.startsWith(`/uploads/${req.user.company_id}/`) && !value.includes('..'));
   const themeSettings = { themeId, customPrimary, customSecondary, mode, sidebarMode, statCardStyle, logoUrl, faviconUrl };
   if (qrisUrl !== undefined) themeSettings.qrisUrl = qrisUrl;
+  if (hasReceiptSettings) {
+    themeSettings.receiptSettings = {
+      mode: receiptSettings?.mode,
+      accent: receiptSettings?.accent,
+      storeAddress: typeof receiptSettings?.storeAddress === 'string' ? receiptSettings.storeAddress.trim() : '',
+      footerNote: typeof receiptSettings?.footerNote === 'string' ? receiptSettings.footerNote.trim() : '',
+    };
+  }
+  const validReceiptSettings = !hasReceiptSettings || (
+    receiptSettings
+    && typeof receiptSettings === 'object'
+    && !Array.isArray(receiptSettings)
+    && ['digital', 'thermal', 'mobile'].includes(receiptSettings.mode)
+    && ['emerald', 'crimson', 'royal'].includes(receiptSettings.accent)
+    && typeof receiptSettings.storeAddress === 'string'
+    && receiptSettings.storeAddress.length <= 240
+    && typeof receiptSettings.footerNote === 'string'
+    && receiptSettings.footerNote.length <= 240
+  );
   if (!themeIds.has(themeId)
     || !validColor(customPrimary)
     || !validColor(customSecondary)
@@ -1009,6 +1079,7 @@ app.put('/api/workspace/theme', authenticate, requireRole('SUPER ADMIN', 'OWNER'
     || !['shadow', 'border', 'soft'].includes(statCardStyle)
     || !validAsset(logoUrl)
     || !validAsset(faviconUrl)
+    || !validReceiptSettings
     || (hasQrisUrl && qrisUrl === undefined)
     || !validAsset(qrisUrl)) {
     return res.status(400).json({ message: 'Pengaturan tampilan tidak valid.' });
@@ -1420,8 +1491,21 @@ app.get('/api/support/tickets', async (req, res, next) => {
   if (!email) return res.status(400).json({ message: 'Email pengguna wajib diisi.' });
   try {
     const result = await pool.query(
-      `SELECT id, ticket_number, requester_name, requester_email, subject, status, created_at, updated_at
-       FROM support_tickets WHERE requester_email = $1 ORDER BY updated_at DESC`,
+      `SELECT t.id, t.ticket_number, t.requester_name, t.requester_email, t.subject, t.status, t.created_at, t.updated_at,
+              latest.id AS latest_owner_message_id, latest.body AS latest_owner_message,
+              latest.created_at AS latest_owner_message_at, unread.message_count AS unread_owner_count
+       FROM support_tickets t
+       LEFT JOIN LATERAL (
+         SELECT m.id, m.body, m.created_at FROM support_messages m
+         WHERE m.ticket_id = t.id AND m.sender_type = 'owner'
+         ORDER BY m.created_at DESC LIMIT 1
+       ) latest ON true
+       LEFT JOIN LATERAL (
+         SELECT count(*)::int AS message_count FROM support_messages m
+         WHERE m.ticket_id = t.id AND m.sender_type = 'owner' AND m.user_read_at IS NULL
+       ) unread ON true
+       WHERE t.requester_email = $1
+       ORDER BY t.updated_at DESC LIMIT 50`,
       [email],
     );
     res.json({ tickets: result.rows });
@@ -1444,6 +1528,26 @@ app.get('/api/support/tickets/:ticketId', async (req, res, next) => {
       [req.params.ticketId],
     );
     res.json({ ticket: ticketResult.rows[0], messages: messageResult.rows });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/support/tickets/:ticketId/read', async (req, res, next) => {
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  if (!email) return res.status(400).json({ message: 'Email pengguna wajib diisi.' });
+  try {
+    const ticketResult = await pool.query(
+      'SELECT id FROM support_tickets WHERE id = $1 AND requester_email = $2',
+      [req.params.ticketId, email],
+    );
+    if (!ticketResult.rowCount) return res.status(404).json({ message: 'Percakapan tidak ditemukan.' });
+    await pool.query(
+      `UPDATE support_messages SET user_read_at = now()
+       WHERE ticket_id = $1 AND sender_type = 'owner' AND user_read_at IS NULL`,
+      [ticketResult.rows[0].id],
+    );
+    res.json({ ok: true });
   } catch (error) {
     next(error);
   }

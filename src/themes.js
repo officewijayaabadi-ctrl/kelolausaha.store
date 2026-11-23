@@ -21,13 +21,62 @@ export const defaultThemeSettings = {
   logoUrl: '',
   faviconUrl: '',
   qrisUrl: '',
+  receiptSettings: {
+    mode: 'digital',
+    accent: 'crimson',
+    storeAddress: '',
+    footerNote: 'Terima kasih atas kepercayaan Anda.',
+  },
 };
 
-export function normalizeThemeSettings(settings = {}) {
-  const normalized = { ...defaultThemeSettings, ...settings };
+const receiptAccentByBusinessType = {
+  laundry: 'emerald',
+  dealer_motor: 'crimson',
+  retail: 'royal',
+  restaurant: 'crimson',
+  services: 'royal',
+  workshop: 'crimson',
+  salon: 'royal',
+  printing: 'royal',
+  distribution: 'emerald',
+};
+
+export function getDefaultReceiptSettings(businessType) {
+  return {
+    ...defaultThemeSettings.receiptSettings,
+    accent: receiptAccentByBusinessType[businessType] || defaultThemeSettings.receiptSettings.accent,
+  };
+}
+
+export function normalizeThemeSettings(settings = {}, businessType = 'dealer_motor') {
+  const { receiptSettings, ...otherSettings } = settings && typeof settings === 'object' && !Array.isArray(settings)
+    ? settings
+    : {};
+  const normalized = {
+    ...defaultThemeSettings,
+    ...otherSettings,
+    receiptSettings: {
+      ...getDefaultReceiptSettings(businessType),
+      ...(receiptSettings && typeof receiptSettings === 'object' && !Array.isArray(receiptSettings)
+        ? receiptSettings
+        : {}),
+    },
+  };
   if (normalized.themeId === 'blue-professional') normalized.themeId = 'red-white';
   return normalized;
 }
+
+export const receiptModes = [
+  { id: 'digital', name: 'Modern Digital Card', description: 'Kartu nota digital untuk dibagikan.' },
+  { id: 'thermal', name: 'Struk Thermal 58/80mm', description: 'Tampilan ringkas untuk cetak thermal.' },
+  { id: 'mobile', name: 'Compact Mobile Share', description: 'Nota ringkas untuk layar ponsel.' },
+];
+
+export const receiptAccents = [
+  { id: 'emerald', name: 'Emerald Laundry', color: '#059669', background: '#ecfdf5' },
+  { id: 'crimson', name: 'Crimson Kelola Usahaku', color: '#dc2626', background: '#fef2f2' },
+  { id: 'royal', name: 'Royal Blue', color: '#2563eb', background: '#eff6ff' },
+];
 
 export function getThemeColors(settings) {
   const theme = dashboardThemes.find(({ id }) => id === settings.themeId) || dashboardThemes[0];

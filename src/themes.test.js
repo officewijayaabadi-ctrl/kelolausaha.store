@@ -29,4 +29,19 @@ describe('dashboard themes', () => {
       mode: 'dark',
     })).toEqual({ primary: '#123456', secondary: '#e9f5ed', mode: 'dark' });
   });
+
+  test('uses the business type accent for new receipt settings and preserves saved choices', () => {
+    expect(normalizeThemeSettings({}, 'laundry').receiptSettings).toMatchObject({
+      mode: 'digital',
+      accent: 'emerald',
+    });
+    expect(normalizeThemeSettings({
+      receiptSettings: { mode: 'thermal', accent: 'royal', storeAddress: 'Jl. Melati' },
+    }, 'laundry').receiptSettings).toMatchObject({
+      mode: 'thermal',
+      accent: 'royal',
+      storeAddress: 'Jl. Melati',
+      footerNote: 'Terima kasih atas kepercayaan Anda.',
+    });
+  });
 });

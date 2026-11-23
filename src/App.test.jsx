@@ -1,12 +1,13 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import App from './App';
+import App, { createPosReceiptSvg } from './App';
 
 const openOwnerPreview = () => {
   fireEvent.click(screen.getByRole('button', { name: 'Pratinjau dashboard Owner' }));
 };
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   window.history.pushState({}, '', '/');
   window.localStorage.clear();
@@ -137,6 +138,31 @@ test('customizes and saves a company dashboard theme in the demo browser', () =>
   expect(appShell.dataset.sidebar).toBe('mini');
   expect(JSON.parse(localStorage.getItem('ku-demo-theme:dealer_motor')).statCardStyle).toBe('soft');
   expect(screen.getByRole('status').textContent).toContain('Tema pratinjau tersimpan');
+});
+
+test('opens the receipt studio for Owner and Super Admin and saves workspace preferences', async () => {
+  render(<App />);
+  openOwnerPreview();
+  const accountSelector = screen.getByRole('combobox', { name: 'Pilih akun demo' });
+
+  fireEvent.change(accountSelector, { target: { value: 'user-2' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Pengaturan Nota' }));
+  expect(screen.getByRole('heading', { name: 'Studio Nota' })).toBeDefined();
+  fireEvent.click(screen.getByRole('button', { name: /Struk Thermal 58\/80mm/ }));
+  fireEvent.change(screen.getByRole('textbox', { name: 'Alamat / kontak pada nota' }), {
+    target: { value: 'Jl. Melati No. 18' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: /simpan pengaturan nota/i }));
+  await waitFor(() => expect(screen.getByRole('status').textContent).toContain('Pengaturan nota pratinjau tersimpan'));
+
+  expect(JSON.parse(localStorage.getItem('ku-demo-theme:dealer_motor')).receiptSettings).toMatchObject({
+    mode: 'thermal',
+    storeAddress: 'Jl. Melati No. 18',
+  });
+
+  fireEvent.change(accountSelector, { target: { value: 'user-1' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Pengaturan Nota' }));
+  expect(await screen.findByRole('heading', { name: 'Studio Nota' })).toBeDefined();
 });
 
 test('shows tenant summaries only after platform-owner authentication', async () => {
@@ -473,7 +499,7 @@ test('shows pending approval after employee OTP verification without opening a s
   expect(screen.queryByRole('heading', { name: 'Dashboard' })).toBeNull();
 });
 
-test('creates a POS receipt and prepares its WhatsApp share message', async () => {
+test('creates a POS receipt and sends its original image through WhatsApp Web', async () => {
   render(<App />);
   openOwnerPreview();
   fireEvent.change(screen.getByRole('combobox', { name: 'Pilih akun demo' }), {
@@ -494,18 +520,90 @@ test('creates a POS receipt and prepares its WhatsApp share message', async () =
 
   expect(screen.getByRole('heading', { name: 'Nota Digital' })).toBeDefined();
   expect(screen.getAllByText(/POS-\d{8}-0001/).length).toBeGreaterThan(0);
-  const shareLink = screen.getByRole('link', { name: /bagikan nota via whatsapp/i });
-  const shareUrl = new URL(shareLink.href);
-  expect(shareUrl.hostname).toBe('wa.me');
-  expect(shareUrl.pathname).toBe('/6281234567890');
-  expect(shareUrl.searchParams.get('text')).toContain('Budi Santoso');
-  expect(shareUrl.searchParams.get('text')).toContain('Cuci reguler');
-  expect(shareUrl.searchParams.get('text')).toContain('7.000');
+  const nativeUrl = URL;
+  class TestUrl extends nativeUrl {}
+  TestUrl.createObjectURL = vi.fn(() => 'blob:receipt');
+  TestUrl.revokeObjectURL = vi.fn();
+  vi.stubGlobal('URL', TestUrl);
+  vi.stubGlobal('Image', class {
+    set src(value) {
+      this.onload();
+    }
+  });
+  vi.stubGlobal('ClipboardItem', class {
+    constructor(items) {
+      this.items = items;
+    }
+  });
+  const clipboardWrite = vi.fn().mockResolvedValue(undefined);
+  vi.stubGlobal('navigator', { clipboard: { write: clipboardWrite } });
+  const context = { drawImage: vi.fn() };
+  const originalGetContext = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'getContext');
+  const originalToBlob = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'toBlob');
+  Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
+    configurable: true,
+    value: vi.fn(() => context),
+  });
+  Object.defineProperty(HTMLCanvasElement.prototype, 'toBlob', {
+    configurable: true,
+    value: vi.fn((callback) => callback(new Blob(['receipt image'], { type: 'image/png' }))),
+  });
+  const openWhatsApp = vi.spyOn(window, 'open').mockReturnValue({});
+  fireEvent.click(screen.getByRole('button', { name: /kirim nota asli via whatsapp/i }));
+  expect(await screen.findByText(/Nota asli disalin sebagai gambar/)).toBeDefined();
+  expect(openWhatsApp.mock.calls[0][0]).toContain(
+    'https://web.whatsapp.com/send?phone=6281234567890',
+  );
+  expect((await clipboardWrite.mock.calls[0][0][0].items['image/png']).type).toBe('image/png');
+  if (originalGetContext) Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', originalGetContext);
+  else delete HTMLCanvasElement.prototype.getContext;
+  if (originalToBlob) Object.defineProperty(HTMLCanvasElement.prototype, 'toBlob', originalToBlob);
+  else delete HTMLCanvasElement.prototype.toBlob;
   const print = vi.spyOn(window, 'print').mockImplementation(() => {});
   fireEvent.click(screen.getByRole('button', { name: 'Cetak nota' }));
   await waitFor(() => expect(print).toHaveBeenCalledOnce());
   window.dispatchEvent(new Event('afterprint'));
   print.mockRestore();
+});
+
+test('renders original POS receipt details into its shareable image', () => {
+  const { svg } = createPosReceiptSvg({
+    receiptNumber: 'POS-20261123-0001',
+    customer: 'Ani',
+    createdAt: '2026-11-23T09:44:00.000Z',
+    items: [{ name: 'Cuci komplit express', quantity: 2, unit: 'kg', price: 12000 }],
+    total: 24000,
+    paymentStatus: 'LUNAS',
+    paymentMethod: 'Tunai',
+  }, 'LONDRI BERKAH ABADI');
+
+  expect(svg).toContain('LONDRI BERKAH ABADI');
+  expect(svg).toContain('POS-20261123-0001');
+  expect(svg).toContain('Cuci komplit express');
+  expect(svg).toContain('24.000');
+  expect(svg).toContain('LUNAS (Tunai)');
+});
+
+test('applies the workspace receipt settings to its shareable image', () => {
+  const { svg } = createPosReceiptSvg({
+    receiptNumber: 'POS-20261123-0002',
+    customer: 'Budi',
+    createdAt: '2026-11-23T09:44:00.000Z',
+    items: [{ name: 'Cuci kiloan', quantity: 3, unit: 'kg', price: 8000 }],
+    total: 24000,
+    paymentStatus: 'LUNAS',
+    paymentMethod: 'Tunai',
+  }, 'LONDRI BERKAH ABADI', {
+    mode: 'thermal',
+    accent: 'royal',
+    storeAddress: 'Jl. Melati No. 18',
+    footerNote: 'Simpan nota ini.',
+  });
+
+  expect(svg).toContain('STRUK PEMBAYARAN');
+  expect(svg).toContain('fill="#2563eb"');
+  expect(svg).toContain('Jl. Melati No. 18');
+  expect(svg).toContain('Simpan nota ini.');
 });
 
 test('creates and prints a motorcycle purchase receipt from submitted SPK data', async () => {
@@ -733,11 +831,7 @@ test('routes a restaurant digital order through cashier, kitchen, waiter, paymen
   expect(screen.getByText('LUNAS')).toBeDefined();
 
   fireEvent.click(screen.getByRole('button', { name: 'Nota Restoran' }));
-  const shareUrl = new URL(screen.getByRole('link', { name: /Bagikan nota via WhatsApp/i }).href);
-  expect(shareUrl.hostname).toBe('wa.me');
-  expect(shareUrl.searchParams.get('text')).toContain('Meja: 05');
-  expect(shareUrl.searchParams.get('text')).toContain('Budi Santoso');
-  expect(shareUrl.searchParams.get('text')).toContain('Catatan khusus: Tanpa bawang');
+  expect(screen.getByRole('button', { name: /Kirim nota asli via WhatsApp/i })).toBeDefined();
 });
 
 test('opens a table QR as a public menu and stores the order with its automatic table number', () => {
@@ -876,4 +970,67 @@ test('shows the latest support reply automatically in the help center', async ()
 
   expect(await screen.findByText('Balasan email dari tim support.')).toBeDefined();
   expect(screen.getByRole('button', { name: /KU-ABCD1234.*Pertanyaan lainnya/ })).toBeDefined();
+});
+
+test('notifies signed-in users about support replies in the floating operator widget', async () => {
+  const ticket = {
+    id: 'ticket-replied',
+    ticket_number: 'KU-ABCD1234',
+    requester_name: 'Rika Wijaya',
+    requester_email: 'rika@wam.co.id',
+    subject: 'Pertanyaan lainnya',
+    status: 'waiting_user',
+    unread_owner_count: 1,
+    latest_owner_message: 'Balasan sudah kami kirim.',
+  };
+  const fetchMock = vi.fn(async (url, options = {}) => {
+    if (url === '/api/auth/session') {
+      return {
+        ok: true,
+        json: async () => ({
+          user: {
+            id: 'owner-1',
+            name: 'Rika Wijaya',
+            email: ticket.requester_email,
+            role: 'OWNER',
+            permissions: ['dashboard'],
+          },
+          business: { id: 'company-1', name: 'Usaha Contoh' },
+        }),
+      };
+    }
+    if (url.startsWith('/api/support/tickets?email=')) {
+      return { ok: true, json: async () => ({ tickets: [ticket] }) };
+    }
+    if (url === `/api/support/tickets/${ticket.id}/read` && options.method === 'POST') {
+      return { ok: true, json: async () => ({ ok: true }) };
+    }
+    if (url.startsWith(`/api/support/tickets/${ticket.id}?email=`)) {
+      return {
+        ok: true,
+        json: async () => ({
+          ticket,
+          messages: [{
+            id: 'reply-1',
+            sender_type: 'owner',
+            sender_name: 'Tim Support KelolaUsaha.store',
+            body: ticket.latest_owner_message,
+            created_at: '2026-11-23T00:00:00.000Z',
+          }],
+        }),
+      };
+    }
+    return { ok: false, status: 404, json: async () => ({ message: 'Not found' }) };
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  render(<App />);
+
+  const operatorButton = await screen.findByRole('button', { name: 'Buka bantuan, 1 balasan baru' });
+  fireEvent.click(operatorButton);
+  fireEvent.click(await screen.findByRole('button', { name: /KU-ABCD1234.*Pertanyaan lainnya/ }));
+
+  expect(await screen.findByText(ticket.latest_owner_message)).toBeDefined();
+  await waitFor(() => expect(fetchMock.mock.calls.some(([url, options]) => (
+    url === `/api/support/tickets/${ticket.id}/read` && options.method === 'POST'
+  ))).toBe(true));
 });

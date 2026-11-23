@@ -121,3 +121,45 @@ export const businessTypes = {
 };
 
 export const businessTypeIds = new Set(Object.keys(businessTypes));
+
+const permissionBusinessModules = {
+  dashboard: 'dashboard',
+  spkCreate: 'sales_orders',
+  spkViewAll: 'sales_orders',
+  spkViewOwn: 'sales_orders',
+  spkVerify: 'sales_orders',
+  spkApprove: 'sales_orders',
+  customerManage: 'customers',
+  salesManage: 'sales_team',
+  unitManage: 'vehicles',
+  deliveryManage: 'delivery',
+  leasingManage: 'financing',
+  reportsView: 'sales_reports',
+  targetManage: 'targets',
+  posAccess: 'pos',
+  priceManage: 'prices',
+  transactionsView: 'transactions',
+  receiptsView: 'digital_receipts',
+  userManage: 'employees',
+  attendanceView: 'employees',
+  attendanceManage: 'employees',
+};
+
+export function isPermissionAvailableForBusiness(permission, businessType, enabledModules) {
+  const moduleId = permissionBusinessModules[permission];
+  if (!moduleId) return true;
+  const business = businessTypes[businessType];
+  if (!business) return false;
+  const businessModuleIds = new Set(business.modules.map(([id]) => id));
+  const requestedModules = Array.isArray(enabledModules)
+    ? new Set(enabledModules)
+    : businessModuleIds;
+  return businessModuleIds.has(moduleId) && requestedModules.has(moduleId);
+}
+
+export function filterPermissionsForBusiness(permissions, businessType, enabledModules) {
+  if (!Array.isArray(permissions)) return [];
+  return permissions.filter((permission) => (
+    isPermissionAvailableForBusiness(permission, businessType, enabledModules)
+  ));
+}
