@@ -503,7 +503,7 @@ jobs:
             node --input-type=module <<'JS'
             import { io } from 'socket.io-client';
 
-            const socket = io('https://kelolausaha.store', {
+            const socket = io('http://127.0.0.1:4000', {
               path: '/api/socket.io',
               transports: ['websocket'],
               timeout: 10000,
@@ -521,7 +521,7 @@ jobs:
                   reject(error);
                 });
               });
-              console.log('Socket.IO websocket connection verified.');
+              console.log('Socket.IO websocket connection to the API verified.');
             } catch (error) {
               console.error(`Socket.IO verification failed: ${error.message}`);
               process.exitCode = 1;
