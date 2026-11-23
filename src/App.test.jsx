@@ -1,12 +1,38 @@
 import { afterEach, expect, test, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import App, { createPosReceiptSvg } from './App';
+
+const { mockIo, mockSocket, mockSocketHandlers } = vi.hoisted(() => {
+  const handlers = new Map();
+  const socket = {
+    on: vi.fn((event, handler) => {
+      handlers.set(event, handler);
+      return socket;
+    }),
+    emit: vi.fn((event, _payload, acknowledge) => {
+      if (event === 'support:join') acknowledge?.({ ok: true });
+    }),
+    disconnect: vi.fn(),
+  };
+  return {
+    mockIo: vi.fn(() => socket),
+    mockSocket: socket,
+    mockSocketHandlers: handlers,
+  };
+});
+
+vi.mock('socket.io-client', () => ({ io: mockIo }));
 
 const openOwnerPreview = () => {
   fireEvent.click(screen.getByRole('button', { name: 'Pratinjau dashboard Owner' }));
 };
 
 afterEach(() => {
+  mockIo.mockClear();
+  mockSocket.on.mockClear();
+  mockSocket.emit.mockClear();
+  mockSocket.disconnect.mockClear();
+  mockSocketHandlers.clear();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   window.history.pushState({}, '', '/');
@@ -1200,6 +1226,13 @@ test('notifies signed-in users about support replies in the floating operator wi
   fireEvent.click(await screen.findByRole('button', { name: /KU-ABCD1234.*Pertanyaan lainnya/ }));
 
   expect(await screen.findByText(ticket.latest_owner_message)).toBeDefined();
+  await act(async () => mockSocketHandlers.get('connect')?.());
+  expect(screen.getByText('● Chat real-time aktif')).toBeDefined();
+  expect(mockSocket.emit).toHaveBeenCalledWith(
+    'support:join',
+    { email: ticket.requester_email },
+    expect.any(Function),
+  );
   await waitFor(() => expect(fetchMock.mock.calls.some(([url, options]) => (
     url === `/api/support/tickets/${ticket.id}/read` && options.method === 'POST'
   ))).toBe(true));

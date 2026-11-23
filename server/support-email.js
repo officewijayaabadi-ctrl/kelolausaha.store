@@ -5,6 +5,7 @@ export async function processInboundSupportEmail({
   mailboxPath = 'INBOX',
   pool,
   sendEmail,
+  onMessage,
   supportEmail,
   uid,
 }) {
@@ -69,6 +70,7 @@ export async function processInboundSupportEmail({
     `UPDATE support_tickets SET status = $1, updated_at = now() WHERE ticket_number = $2`,
     [isSupportReply ? 'waiting_user' : 'new', ticketNumber],
   );
+  if (insertResult.rowCount) onMessage?.(ticket.id);
 
   if (isSupportReply && !isSentMailbox && !messageRow.email_forwarded_at) {
     await sendEmail({

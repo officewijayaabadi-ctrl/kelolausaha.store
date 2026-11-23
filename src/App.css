@@ -1078,10 +1078,12 @@ td .spk-id { color: #316d50; font-size: 9px; }
   .support-status.status-processing { color: #8a6416; background: #fff1d0; }
   .support-status.status-resolved { color: #1d744a; background: #e6f4ec; }
   .support-conversation { display: grid; min-width: 0; grid-template-rows: auto minmax(260px, 1fr) auto; }
-  .support-conversation-header { padding: 14px 18px; border-bottom: 1px solid #edf0f2; }
+  .support-conversation-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; border-bottom: 1px solid #edf0f2; }
   .support-conversation-header strong { color: #b02a38; font-size: 9px; }
   .support-conversation-header h2 { margin: 4px 0 2px; font-size: 15px; }
   .support-conversation-header p { margin: 0; color: #87919a; font-size: 9px; }
+  .support-realtime-status { flex: 0 0 auto; color: #8a9098; font-size: 10px; white-space: nowrap; }
+  .support-realtime-status.connected { color: #198754; }
   .support-messages { display: flex; flex-direction: column; gap: 8px; max-height: 360px; padding: 16px 18px; overflow-y: auto; background: #fafbfb; }
   .support-message { max-width: 78%; align-self: flex-start; padding: 9px 11px; border: 1px solid #edf0f2; border-radius: 8px 8px 8px 2px; background: #fff; }
   .support-message.owner { align-self: flex-end; border-color: #dcebe1; border-radius: 8px 8px 2px 8px; background: #eff7f1; }

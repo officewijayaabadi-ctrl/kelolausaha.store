@@ -1,12 +1,14 @@
 import 'dotenv/config';
 import { createHash, createHmac, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import multer from 'multer';
 import nodemailer from 'nodemailer';
 import { ImapFlow } from 'imapflow';
+import { Server as SocketIOServer } from 'socket.io';
 import { simpleParser } from 'mailparser';
 import pg from 'pg';
 import { fileTypeFromBuffer } from 'file-type';
@@ -22,6 +24,11 @@ import { addCalendarMonths, getBranchAddon, getPlan, plans, branchAddons, subscr
 import { resolveTenantSlug, slugifyBusinessName, workspaceUrlFor } from './tenant-domain.js';
 import { createWorkspaceOperationsRouter } from './workspace-operations.js';
 import { processInboundSupportEmail } from './support-email.js';
+import {
+  notifySupportTicketCreated,
+  notifySupportTicketUpdated,
+  registerSupportSockets,
+} from './support-chat.js';
 
 const { Pool } = pg;
 const app = express();
@@ -39,6 +46,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 2 *
 const otpRateLimits = new Map();
 const sentSupportMailboxCursors = new Map();
 let gmailSyncInProgress = false;
+let supportIo = null;
 const themeIds = new Set(['blue-professional', 'green-fresh', 'purple-elegant', 'orange-cheerful', 'pink-sweet', 'teal-modern', 'navy-elegant', 'yellow-warm', 'gray-minimal', 'white-clean']);
 const imageExtensions = new Set(['png', 'jpg', 'webp', 'ico']);
 const permissionSets = {
@@ -348,6 +356,21 @@ async function sendSupportEmail({ to, subject, text, ticketNumber }) {
   });
 }
 
+function queueSupportEmailNotification(options, context, messageId = null) {
+  void sendSupportEmail(options)
+    .then(async (sentEmail) => {
+      if (messageId && sentEmail.messageId) {
+        await pool.query(
+          'UPDATE support_messages SET email_message_id = $1 WHERE id = $2',
+          [sentEmail.messageId, messageId],
+        );
+      }
+    })
+    .catch((error) => {
+      console.error(`Support email notification failed (${context}):`, error.message);
+    });
+}
+
 async function ingestGmailReplies() {
   const user = process.env.IMAP_USER || configuredSmtpUser() || configuredSupportEmail();
   const password = process.env.IMAP_PASSWORD || process.env.SMTP_PASSWORD;
@@ -409,6 +432,7 @@ async function ingestGmailReplies() {
               message: parsed,
               pool,
               sendEmail: sendSupportEmail,
+              onMessage: (ticketId) => notifySupportTicketUpdated(supportIo, ticketId),
               supportEmail,
               uid: message.uid,
             });
@@ -1604,12 +1628,13 @@ app.post('/api/support/tickets', async (req, res, next) => {
        VALUES ($1, 'user', $2, $3, $4)`,
       [ticket.id, requesterName, requesterEmail, message],
     );
-    await sendSupportEmail({
+    notifySupportTicketCreated(supportIo, ticket.id);
+    queueSupportEmailNotification({
       to: configuredSupportEmail(),
       subject,
       ticketNumber,
       text: `Pesan baru dari ${requesterName} (${requesterEmail})\n\n${message}\n\nNomor tiket: ${ticketNumber}`,
-    });
+    }, `new ticket ${ticketNumber}`);
     res.status(201).json({ ticket: { id: ticket.id, ticketNumber: ticket.ticket_number, status: ticket.status } });
   } catch (error) {
     next(error);
@@ -1705,12 +1730,13 @@ app.post('/api/support/tickets/:ticketId/messages', async (req, res, next) => {
       `UPDATE support_tickets SET status = 'new', updated_at = now() WHERE id = $1`,
       [ticket.id],
     );
-    await sendSupportEmail({
+    notifySupportTicketUpdated(supportIo, ticket.id);
+    queueSupportEmailNotification({
       to: configuredSupportEmail(),
       subject: ticket.subject,
       ticketNumber: ticket.ticket_number,
       text: `Pesan lanjutan dari ${ticket.requester_name} (${email})\n\n${body}\n\nNomor tiket: ${ticket.ticket_number}`,
-    });
+    }, `user reply ${ticket.ticket_number}`);
     res.json({ ok: true });
   } catch (error) {
     next(error);
@@ -1768,18 +1794,13 @@ app.post('/api/platform/support/tickets/:ticketId/reply', authenticate, requireR
       `UPDATE support_tickets SET status = $1, updated_at = now() WHERE id = $2`,
       [status, ticket.id],
     );
-    const sentEmail = await sendSupportEmail({
+    notifySupportTicketUpdated(supportIo, ticket.id);
+    queueSupportEmailNotification({
       to: ticket.requester_email,
       subject: `Balasan: ${ticket.subject}`,
       ticketNumber: ticket.ticket_number,
       text: `Halo ${ticket.requester_name},\n\n${body}\n\nTim KelolaUsaha.store\n\nNomor tiket: ${ticket.ticket_number}`,
-    });
-    if (sentEmail.messageId) {
-      await pool.query(
-        'UPDATE support_messages SET email_message_id = $1 WHERE id = $2',
-        [sentEmail.messageId, savedMessage.rows[0].id],
-      );
-    }
+    }, `owner reply ${ticket.ticket_number}`, savedMessage.rows[0].id);
     res.json({ ok: true });
   } catch (error) {
     next(error);
@@ -1913,7 +1934,13 @@ async function start() {
     const migration = await readFile(resolve(migrationDirectory, migrationFile), 'utf8');
     await pool.query(migration);
   }
-  app.listen(PORT, () => console.log(`KelolaUsaha API listening on ${PORT}`));
+  const httpServer = createServer(app);
+  supportIo = new SocketIOServer(httpServer, {
+    path: '/api/socket.io',
+    serveClient: false,
+  });
+  registerSupportSockets(supportIo, { pool, hash });
+  httpServer.listen(PORT, () => console.log(`KelolaUsaha API listening on ${PORT}`));
   const reminderTimer = setInterval(() => {
     sendRenewalReminders().catch((error) => console.error('Reminder job failed:', error));
   }, 60 * 60 * 1000);

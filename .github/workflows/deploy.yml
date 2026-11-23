@@ -180,6 +180,18 @@ jobs:
                 ssl_certificate /etc/letsencrypt/live/kelolausaha-tenant-wildcard/fullchain.pem;
                 ssl_certificate_key /etc/letsencrypt/live/kelolausaha-tenant-wildcard/privkey.pem;
 
+                location ^~ /api/socket.io/ {
+                    proxy_pass http://127.0.0.1:4000;
+                    proxy_http_version 1.1;
+                    proxy_set_header Upgrade $http_upgrade;
+                    proxy_set_header Connection "upgrade";
+                    proxy_set_header Host $host;
+                    proxy_set_header X-Real-IP $remote_addr;
+                    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                    proxy_set_header X-Forwarded-Proto $scheme;
+                    proxy_read_timeout 120s;
+                }
+
                 location = /api {
                     proxy_pass http://127.0.0.1:4000;
                     proxy_http_version 1.1;
@@ -418,5 +430,36 @@ jobs:
 
             echo "Restarting backend..."
             systemctl restart kelolausaha
+
+            echo "Verifying realtime support chat..."
+            node --input-type=module <<'JS'
+            import { io } from 'socket.io-client';
+
+            const socket = io('https://kelolausaha.store', {
+              path: '/api/socket.io',
+              transports: ['websocket'],
+              timeout: 10000,
+            });
+
+            try {
+              await new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => reject(new Error('Socket.IO connection timed out.')), 12000);
+                socket.once('connect', () => {
+                  clearTimeout(timeout);
+                  resolve();
+                });
+                socket.once('connect_error', (error) => {
+                  clearTimeout(timeout);
+                  reject(error);
+                });
+              });
+              console.log('Socket.IO websocket connection verified.');
+            } catch (error) {
+              console.error(`Socket.IO verification failed: ${error.message}`);
+              process.exitCode = 1;
+            } finally {
+              socket.disconnect();
+            }
+            JS
 
             echo "Deployment completed."

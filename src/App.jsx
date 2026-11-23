@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { flushSync } from 'react-dom';
 import QRCode from 'qrcode';
+import { io } from 'socket.io-client';
 import './App.css';
 import PublicSite from './PublicSite';
 import { plans as activationPlans } from '../shared/plans.js';
@@ -1058,6 +1059,7 @@ function App() {
   const [supportOwnerReply, setSupportOwnerReply] = useState('');
   const [supportOwnerStatus, setSupportOwnerStatus] = useState('waiting_user');
   const [supportContactEmail, setSupportContactEmail] = useState('');
+  const [supportRealtimeConnected, setSupportRealtimeConnected] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [supportBusy, setSupportBusy] = useState(false);
   const [supportError, setSupportError] = useState('');
@@ -2293,6 +2295,97 @@ function App() {
   }, [activePage, activeUser.role, helpOpen]);
 
   useEffect(() => {
+    const isPlatformSupportOwner = isAuthenticated && activeUser.role === 'PLATFORM_OWNER';
+    const shouldConnect = !demoMode && (
+      activePage === 'Pusat Bantuan'
+      || helpOpen
+      || (isAuthenticated && !isPlatformSupportOwner)
+    );
+    const requesterEmail = String(supportEmail || (isAuthenticated ? activeUser.email : '') || '')
+      .trim()
+      .toLowerCase();
+    if (!shouldConnect || (!isPlatformSupportOwner && !requesterEmail)) {
+      setSupportRealtimeConnected(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+    const socket = io({
+      path: '/api/socket.io',
+      withCredentials: true,
+    });
+    const joinSupport = () => {
+      socket.emit(
+        'support:join',
+        isPlatformSupportOwner ? {} : { email: requesterEmail },
+        (result) => {
+          if (!cancelled) {
+            setSupportRealtimeConnected(Boolean(result?.ok));
+            if (!result?.ok) {
+              setSupportError(result?.message || 'Koneksi percakapan bantuan ditolak.');
+            }
+          }
+        },
+      );
+    };
+    const refreshConversation = (payload) => {
+      const ticketId = String(payload?.ticketId || '');
+      if (!ticketId) return;
+      if (isPlatformSupportOwner) {
+        loadOwnerSupportTickets().catch((error) => {
+          if (!cancelled) setSupportError(error.message);
+        });
+        if (supportOwnerTicket?.id === ticketId) {
+          openOwnerSupportTicket(ticketId).catch((error) => {
+            if (!cancelled) setSupportError(error.message);
+          });
+        }
+      } else {
+        loadSupportTickets(requesterEmail).catch((error) => {
+          if (!cancelled) setSupportError(error.message);
+        });
+        if (supportActiveTicket?.id === ticketId) {
+          loadSupportConversation(ticketId, requesterEmail).catch((error) => {
+            if (!cancelled) setSupportError(error.message);
+          });
+        }
+      }
+    };
+
+    socket.on('connect', () => {
+      if (cancelled) return;
+      joinSupport();
+    });
+    socket.on('disconnect', () => {
+      if (!cancelled) setSupportRealtimeConnected(false);
+    });
+    socket.on('connect_error', (error) => {
+      if (!cancelled) {
+        setSupportRealtimeConnected(false);
+        console.error('Koneksi real-time Pusat Bantuan gagal:', error.message);
+      }
+    });
+    socket.on('support:updated', refreshConversation);
+    socket.on('support:ticket-created', refreshConversation);
+
+    return () => {
+      cancelled = true;
+      socket.disconnect();
+      setSupportRealtimeConnected(false);
+    };
+  }, [
+    activePage,
+    activeUser.email,
+    activeUser.role,
+    demoMode,
+    helpOpen,
+    isAuthenticated,
+    supportActiveTicket?.id,
+    supportEmail,
+    supportOwnerTicket?.id,
+  ]);
+
+  useEffect(() => {
     if (!isAuthenticated || activeUser.role === 'PLATFORM_OWNER') {
       setSupportUnreadTickets([]);
       return undefined;
@@ -3279,7 +3372,7 @@ function App() {
               <section className="support-conversation">
                 {supportOwnerTicket ? (
                   <>
-                    <div className="support-conversation-header"><div><strong>{supportOwnerTicket.ticket_number}</strong><h2>{supportOwnerTicket.subject}</h2><p>{supportOwnerTicket.requester_name} · {supportOwnerTicket.requester_email}</p></div></div>
+                    <div className="support-conversation-header"><div><strong>{supportOwnerTicket.ticket_number}</strong><h2>{supportOwnerTicket.subject}</h2><p>{supportOwnerTicket.requester_name} · {supportOwnerTicket.requester_email}</p></div><span aria-live="polite" className={`support-realtime-status${supportRealtimeConnected ? ' connected' : ''}`}>{supportRealtimeConnected ? '● Chat real-time aktif' : '○ Menghubungkan chat...'}</span></div>
                     <div className="support-messages">
                       {supportOwnerMessages.map((message) => <article className={`support-message ${message.sender_type}`} key={message.id}><small>{message.sender_type === 'owner' ? 'Tim Support KelolaUsaha.store' : message.sender_name}</small><p>{message.body}</p><time>{new Intl.DateTimeFormat('id-ID', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(message.created_at))}</time></article>)}
                     </div>
@@ -3328,7 +3421,7 @@ function App() {
               <section className="support-conversation">
                 {supportActiveTicket ? (
                   <>
-                    <div className="support-conversation-header"><div><strong>{supportActiveTicket.ticket_number}</strong><h2>{supportActiveTicket.subject}</h2></div></div>
+                    <div className="support-conversation-header"><div><strong>{supportActiveTicket.ticket_number}</strong><h2>{supportActiveTicket.subject}</h2></div><span aria-live="polite" className={`support-realtime-status${supportRealtimeConnected ? ' connected' : ''}`}>{supportRealtimeConnected ? '● Chat real-time aktif' : '○ Menghubungkan chat...'}</span></div>
                     <div className="support-messages">
                       {supportMessages.map((message) => <article className={`support-message ${message.sender_type}`} key={message.id}><small>{message.sender_type === 'owner' ? 'Tim KelolaUsaha.store' : 'Anda'}</small><p>{message.body}</p><time>{new Intl.DateTimeFormat('id-ID', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(message.created_at))}</time></article>)}
                     </div>
@@ -4074,7 +4167,7 @@ function App() {
             </button>)}
           </section>}
           {supportError && <p className="support-notification-error" role="alert">{supportError}</p>}
-          <p>Operator kami siap membantu. Pesan dikirim melalui email.</p>
+          <p>Chat langsung dengan tim kami; email menerima notifikasi pesan baru.</p>
           <button className="help-popover-action" onClick={() => openSupport()} type="button">Pusat bantuan <span aria-hidden="true">→</span></button>
           {supportContactEmail && <a className="help-popover-email" href={`mailto:${supportContactEmail}?subject=${encodeURIComponent('Bantuan KelolaUsaha.store')}`}>Email langsung ↗</a>}
         </div>}

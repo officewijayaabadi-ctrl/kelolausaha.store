@@ -70,6 +70,7 @@ test('does not mark an email reply forwarded when delivery fails', async () => {
 test('imports a sent-folder reply as an outbound owner message without sending it again', async () => {
   const pool = createPool();
   const sendEmail = vi.fn();
+  const onMessage = vi.fn();
 
   await processInboundSupportEmail({
     mailboxUser: 'kelolausaha.store@gmail.com',
@@ -79,6 +80,7 @@ test('imports a sent-folder reply as an outbound owner message without sending i
       ...ownerReply,
       to: { value: [{ address: ticket.requester_email }] },
     },
+    onMessage,
     pool,
     sendEmail,
     supportEmail: 'kelolausaha.store@gmail.com',
@@ -96,6 +98,7 @@ test('imports a sent-folder reply as an outbound owner message without sending i
     'outbound',
   ]);
   expect(sendEmail).not.toHaveBeenCalled();
+  expect(onMessage).toHaveBeenCalledWith(ticket.id);
   expect(pool.query.mock.calls.some(([query]) => query.includes('email_forwarded_at = now()'))).toBe(false);
 });
 
