@@ -17,6 +17,7 @@ import { createOperationsRouter, createPublicOperationsRouter } from './operatio
 import { addCalendarMonths, getBranchAddon, getPlan, plans, branchAddons, subscriptionStatus, trialEndsAt } from './plans.js';
 import { resolveTenantSlug, slugifyBusinessName, workspaceUrlFor } from './tenant-domain.js';
 import { createWorkspaceOperationsRouter } from './workspace-operations.js';
+import { processInboundSupportEmail } from './support-email.js';
 
 const { Pool } = pg;
 const app = express();
@@ -320,48 +321,14 @@ async function ingestGmailReplies() {
     try {
       for await (const message of client.fetch({ seen: false }, { source: true, envelope: true, uid: true })) {
         const parsed = await simpleParser(message.source);
-        const combinedText = `${parsed.subject || ''}\n${parsed.text || ''}\n${parsed.html || ''}`;
-        const ticketNumberMatch = combinedText.match(/KU-[A-F0-9]{8}/i);
-        if (!ticketNumberMatch) {
-          await client.messageFlagsAdd(message.uid, ['Seen'], { uid: true });
-          continue;
-        }
-
-        const ticketNumber = ticketNumberMatch[0].toUpperCase();
-        const ticketResult = await pool.query(
-          'SELECT * FROM support_tickets WHERE ticket_number = $1',
-          [ticketNumber],
-        );
-        if (!ticketResult.rowCount) {
-          await client.messageFlagsAdd(message.uid, ['Seen'], { uid: true });
-          continue;
-        }
-
-        const senderEmail = parsed.from?.value?.[0]?.address?.toLowerCase()
-          || String(process.env.PLATFORM_OWNER_EMAIL || '').toLowerCase();
-        const ownerEmail = configuredSupportEmail().toLowerCase();
-        const senderType = senderEmail === ownerEmail ? 'owner' : 'user';
-        const body = String(parsed.text || parsed.html || '').trim().slice(0, 5000);
-        if (body) {
-          await pool.query(`
-            INSERT INTO support_messages (
-              ticket_id, sender_type, sender_name, sender_email, body,
-              email_message_id, email_direction
-            ) VALUES ($1, $2, $3, $4, $5, $6, 'inbound')
-            ON CONFLICT (email_message_id) DO NOTHING
-          `, [
-            ticketResult.rows[0].id,
-            senderType,
-            parsed.from?.value?.[0]?.name || (senderType === 'owner' ? 'Owner KelolaUsaha.store' : ticketResult.rows[0].requester_name),
-            senderEmail,
-            body,
-            parsed.messageId || null,
-          ]);
-          await pool.query(
-            `UPDATE support_tickets SET status = $1, updated_at = now() WHERE ticket_number = $2`,
-            [senderType === 'owner' ? 'waiting_user' : 'new', ticketNumber],
-          );
-        }
+        await processInboundSupportEmail({
+          mailboxUser: user,
+          message: parsed,
+          pool,
+          sendEmail: sendSupportEmail,
+          supportEmail: configuredSupportEmail(),
+          uid: message.uid,
+        });
         await client.messageFlagsAdd(message.uid, ['Seen'], { uid: true });
       }
     } finally {

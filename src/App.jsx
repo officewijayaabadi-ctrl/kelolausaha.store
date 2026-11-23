@@ -912,6 +912,7 @@ function App() {
   const [supportTickets, setSupportTickets] = useState([]);
   const [supportActiveTicket, setSupportActiveTicket] = useState(null);
   const [supportMessages, setSupportMessages] = useState([]);
+  const [supportStartNew, setSupportStartNew] = useState(false);
   const [supportOwnerTickets, setSupportOwnerTickets] = useState([]);
   const [supportOwnerTicket, setSupportOwnerTicket] = useState(null);
   const [supportOwnerMessages, setSupportOwnerMessages] = useState([]);
@@ -1087,6 +1088,7 @@ function App() {
       if (!response.ok) throw new Error(result.message || 'Pesan bantuan tidak dapat dikirim.');
       setSupportName(supportName);
       setSupportDraft('');
+      setSupportStartNew(false);
       await loadSupportTickets(supportEmail);
       setSupportActiveTicket(result.ticket);
       await loadSupportConversation(result.ticket.id, supportEmail);
@@ -1953,6 +1955,9 @@ function App() {
   const openSupport = () => {
     setSupportName(activeUser.name || '');
     setSupportEmail(activeUser.email || '');
+    setSupportActiveTicket(null);
+    setSupportMessages([]);
+    setSupportStartNew(false);
     setSupportError('');
     setSupportNotice('');
     setHelpOpen(false);
@@ -2039,6 +2044,52 @@ function App() {
       cancelled = true;
     };
   }, [activePage, activeUser.role, helpOpen]);
+
+  useEffect(() => {
+    if (activePage !== 'Pusat Bantuan' || activeUser.role === 'PLATFORM_OWNER'
+      || !(supportEmail || activeUser.email)) return undefined;
+    let cancelled = false;
+    const email = supportEmail || activeUser.email;
+    if (!supportEmail) setSupportEmail(email);
+    if (!supportName && activeUser.name) setSupportName(activeUser.name);
+    const refreshSupportCenter = async () => {
+      try {
+        const ticketsResponse = await fetch(`/api/support/tickets?email=${encodeURIComponent(email)}`);
+        const ticketsResult = await ticketsResponse.json();
+        if (!ticketsResponse.ok) throw new Error(ticketsResult.message || 'Daftar percakapan bantuan tidak dapat dimuat.');
+        if (cancelled) return;
+        setSupportTickets(ticketsResult.tickets);
+
+        const selectedTicket = ticketsResult.tickets.find((ticket) => ticket.id === supportActiveTicket?.id)
+          || (!supportStartNew ? ticketsResult.tickets[0] : null);
+        if (!selectedTicket) {
+          if (!supportStartNew && supportActiveTicket?.id) {
+            setSupportActiveTicket(null);
+            setSupportMessages([]);
+          }
+          return;
+        }
+
+        const response = await fetch(
+          `/api/support/tickets/${selectedTicket.id}?email=${encodeURIComponent(email)}`,
+        );
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message || 'Percakapan bantuan tidak dapat dimuat.');
+        if (!cancelled) {
+          setSupportActiveTicket(result.ticket);
+          setSupportMessages(result.messages);
+        }
+      } catch (error) {
+        if (!cancelled) setSupportError(error.message);
+      }
+    };
+    refreshSupportCenter();
+    const timer = window.setInterval(refreshSupportCenter, 10000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [activePage, activeUser.email, activeUser.name, activeUser.role, supportActiveTicket?.id, supportEmail, supportStartNew, supportName]);
 
   useEffect(() => {
     const pageIsAllowed = activePage === 'Dashboard'
@@ -2240,7 +2291,7 @@ function App() {
   ]);
 
   useEffect(() => {
-    if (!isAuthenticated || activeUser.role !== 'PLATFORM_OWNER') return undefined;
+    if (!isAuthenticated || activeUser.role !== 'PLATFORM_OWNER' || activePage !== 'Pusat Bantuan') return undefined;
     let cancelled = false;
     const loadSupport = async () => {
       try {
@@ -2248,17 +2299,26 @@ function App() {
         const result = await response.json();
         if (!response.ok) throw new Error(result.message || 'Daftar bantuan tidak dapat dimuat.');
         if (!cancelled) setSupportOwnerTickets(result.tickets);
+        if (supportOwnerTicket?.id) {
+          const conversationResponse = await fetch(`/api/platform/support/tickets/${supportOwnerTicket.id}`);
+          const conversation = await conversationResponse.json();
+          if (!conversationResponse.ok) throw new Error(conversation.message || 'Percakapan bantuan tidak dapat dimuat.');
+          if (!cancelled) {
+            setSupportOwnerTicket(conversation.ticket);
+            setSupportOwnerMessages(conversation.messages);
+          }
+        }
       } catch (error) {
         if (!cancelled) setSupportError(error.message);
       }
     };
     loadSupport();
-    const timer = window.setInterval(loadSupport, 30000);
+    const timer = window.setInterval(loadSupport, 10000);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [activeUser.id, activeUser.role, isAuthenticated]);
+  }, [activePage, activeUser.id, activeUser.role, isAuthenticated, supportOwnerTicket?.id]);
 
   useEffect(() => {
     if (!isAuthenticated || activeUser.role !== 'OWNER') return undefined;
@@ -2856,7 +2916,7 @@ function App() {
                   <>
                     <div className="support-conversation-header"><div><strong>{supportOwnerTicket.ticket_number}</strong><h2>{supportOwnerTicket.subject}</h2><p>{supportOwnerTicket.requester_name} · {supportOwnerTicket.requester_email}</p></div></div>
                     <div className="support-messages">
-                      {supportOwnerMessages.map((message) => <article className={`support-message ${message.sender_type}`} key={message.id}><small>{message.sender_type === 'owner' ? 'Owner KelolaUsaha.store' : message.sender_name}</small><p>{message.body}</p><time>{new Intl.DateTimeFormat('id-ID', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(message.created_at))}</time></article>)}
+                      {supportOwnerMessages.map((message) => <article className={`support-message ${message.sender_type}`} key={message.id}><small>{message.sender_type === 'owner' ? 'Tim Support KelolaUsaha.store' : message.sender_name}</small><p>{message.body}</p><time>{new Intl.DateTimeFormat('id-ID', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(message.created_at))}</time></article>)}
                     </div>
                     <form className="support-reply" onSubmit={replyOwnerSupportTicket}>
                       <label className="field"><span>Status tiket</span><select value={supportOwnerStatus} onChange={(event) => setSupportOwnerStatus(event.target.value)}><option value="new">Baru</option><option value="processing">Diproses</option><option value="waiting_user">Menunggu Pengguna</option><option value="resolved">Selesai</option></select></label>
@@ -2886,11 +2946,19 @@ function App() {
                   </form>
                 ) : (
                   <>
-                    <button className="text-button" type="button" onClick={() => { setSupportActiveTicket(null); setSupportMessages([]); }}>← Percakapan baru</button>
+                    <button className="text-button" type="button" onClick={() => { setSupportActiveTicket(null); setSupportMessages([]); setSupportStartNew(true); }}>← Percakapan baru</button>
                     <div className="support-ticket-summary"><strong>{supportActiveTicket.ticket_number}</strong><span>{supportActiveTicket.status}</span></div>
                   </>
                 )}
-                <div className="support-history-link"><label className="field"><span>Atau muat percakapan lama</span><input type="email" value={supportEmail} onChange={(event) => setSupportEmail(event.target.value)} placeholder="Email Anda" /></label><button className="button button-quiet" type="button" onClick={() => loadSupportTickets(supportEmail).catch((error) => setSupportError(error.message))}>Muatan percakapan</button></div>
+                <div className="support-history-link">
+                  <label className="field"><span>Email untuk riwayat percakapan</span><input type="email" value={supportEmail} onChange={(event) => setSupportEmail(event.target.value)} placeholder="Email Anda" /></label>
+                  <button className="button button-quiet" type="button" onClick={() => loadSupportTickets(supportEmail).catch((error) => setSupportError(error.message))}>Muat percakapan</button>
+                  {supportTickets.map((ticket) => (
+                    <button className="support-history-ticket" key={ticket.id} onClick={() => { setSupportStartNew(false); loadSupportConversation(ticket.id, supportEmail).catch((error) => setSupportError(error.message)); }} type="button">
+                      {ticket.ticket_number} · {ticket.subject}
+                    </button>
+                  ))}
+                </div>
               </aside>
               <section className="support-conversation">
                 {supportActiveTicket ? (
@@ -2902,7 +2970,7 @@ function App() {
                     <form className="support-reply" onSubmit={sendSupportMessage}><label className="field"><span>Tuliskan pesan Anda...</span><textarea required minLength="3" maxLength="5000" value={supportDraft} onChange={(event) => setSupportDraft(event.target.value)} placeholder="Pesan lanjutan..." /></label><button className="button button-primary" disabled={supportBusy} type="submit">Kirim pesan <span>→</span></button></form>
                   </>
                 ) : (
-                  <div className="support-empty"><span className="support-empty-icon">?</span><h2>Halo! Ada yang bisa kami bantu?</h2><p>Silakan pilih pertanyaan atau tuliskan kendala Anda.</p>{supportTickets.map((ticket) => <button className="support-history-ticket" key={ticket.id} onClick={() => loadSupportConversation(ticket.id, supportEmail).catch((error) => setSupportError(error.message))}>{ticket.ticket_number} · {ticket.subject}</button>)}</div>
+                  <div className="support-empty"><span className="support-empty-icon">?</span><h2>Halo! Ada yang bisa kami bantu?</h2><p>Riwayat tiket dan balasan terbaru tampil di sini. Silakan mulai percakapan baru atau pilih tiket dari daftar.</p></div>
                 )}
               </section>
             </div>

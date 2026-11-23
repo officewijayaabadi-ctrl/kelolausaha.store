@@ -758,15 +758,17 @@ test('opens the floating support form and sends the signed-in user email to supp
     subject: 'Pertanyaan lainnya',
     status: 'new',
   };
+  let ticketCreated = false;
   const fetchMock = vi.fn(async (url, options = {}) => {
     if (url === '/api/support/contact') {
       return { ok: true, json: async () => ({ email: 'kelolausaha.store@gmail.com' }) };
     }
     if (url === '/api/support/tickets' && options.method === 'POST') {
+      ticketCreated = true;
       return { ok: true, json: async () => ({ ticket: { id: ticket.id } }) };
     }
     if (url.startsWith('/api/support/tickets?email=')) {
-      return { ok: true, json: async () => ({ tickets: [ticket] }) };
+      return { ok: true, json: async () => ({ tickets: ticketCreated ? [ticket] : [] }) };
     }
     if (url.startsWith(`/api/support/tickets/${ticket.id}?email=`)) {
       return {
@@ -811,4 +813,50 @@ test('opens the floating support form and sends the signed-in user email to supp
       && JSON.parse(options.body).email === 'rika@wam.co.id'
   ))).toBe(true));
   expect(await screen.findByRole('status')).toBeDefined();
+});
+
+test('shows the latest support reply automatically in the help center', async () => {
+  const ticket = {
+    id: 'ticket-replied',
+    ticket_number: 'KU-ABCD1234',
+    requester_name: 'Rika Wijaya',
+    requester_email: 'rika@wam.co.id',
+    subject: 'Pertanyaan lainnya',
+    status: 'waiting_user',
+  };
+  const fetchMock = vi.fn(async (url) => {
+    if (url === '/api/support/contact') {
+      return { ok: true, json: async () => ({ email: 'kelolausaha.store@gmail.com' }) };
+    }
+    if (url.startsWith('/api/support/tickets?email=')) {
+      return { ok: true, json: async () => ({ tickets: [ticket] }) };
+    }
+    if (url.startsWith(`/api/support/tickets/${ticket.id}?email=`)) {
+      return {
+        ok: true,
+        json: async () => ({
+          ticket,
+          messages: [{
+            id: 'reply-1',
+            sender_type: 'owner',
+            sender_name: 'Tim Support KelolaUsaha.store',
+            body: 'Balasan email dari tim support.',
+            created_at: '2026-11-23T00:00:00.000Z',
+          }],
+        }),
+      };
+    }
+    return { ok: false, status: 401, json: async () => ({}) };
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  render(<App />);
+  openOwnerPreview();
+  fireEvent.change(screen.getByRole('combobox', { name: 'Pilih akun demo' }), {
+    target: { value: 'user-2' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Buka bantuan' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Pusat bantuan' }));
+
+  expect(await screen.findByText('Balasan email dari tim support.')).toBeDefined();
+  expect(screen.getByRole('button', { name: /KU-ABCD1234.*Pertanyaan lainnya/ })).toBeDefined();
 });
