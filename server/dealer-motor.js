@@ -19,6 +19,22 @@ function validDate(value) {
     && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
 }
 
+export async function allocateSpkNumber(client, companyId, spkDate) {
+  const dateCode = spkDate.replaceAll('-', '');
+  const numberPattern = `^SPK-WAM-${dateCode}-([0-9]+)$`;
+  await client.query(
+    'SELECT pg_advisory_xact_lock(hashtext($1::text), hashtext($2::text))',
+    [companyId, dateCode],
+  );
+  const result = await client.query(
+    `SELECT COALESCE(MAX(substring(spk_number FROM $2)::bigint), 0) + 1 AS "nextNumber"
+     FROM dealer_motor_spks
+     WHERE company_id = $1 AND spk_number ~ $2`,
+    [companyId, numberPattern],
+  );
+  return `SPK-WAM-${dateCode}-${String(result.rows[0].nextNumber).padStart(4, '0')}`;
+}
+
 function normalizeUnit(body) {
   const brand = typeof body.brand === 'string' ? body.brand.trim() : '';
   const model = typeof body.model === 'string' ? body.model.trim() : '';
@@ -263,14 +279,14 @@ export function createDealerMotorRouter({
 
   router.post('/spks', authenticate, requireTenant, requireActiveTenant,
     requirePermission('spkCreate'), async (req, res, next) => {
-      const { unitId, spkNumber, customerName, customerNik, customerPhone, customerAddress, details = {} } = req.body;
+      const { unitId, customerName, customerNik, customerPhone, customerAddress, details = {} } = req.body;
       if (!uuidPattern.test(String(unitId || ''))
-        || typeof spkNumber !== 'string' || !/^SPK-[A-Z0-9-]{8,40}$/.test(spkNumber)
         || typeof customerName !== 'string' || !customerName.trim() || customerName.trim().length > 160
         || typeof customerNik !== 'string' || !/^\d{16}$/.test(customerNik)
         || typeof customerPhone !== 'string' || !customerPhone.trim() || customerPhone.trim().length > 30
         || typeof customerAddress !== 'string' || !customerAddress.trim() || customerAddress.trim().length > 500
-        || !details || typeof details !== 'object' || Array.isArray(details)) {
+        || !details || typeof details !== 'object' || Array.isArray(details)
+        || !validDate(details.date)) {
         return res.status(400).json({ message: 'Data SPK tidak valid.' });
       }
       try {
@@ -296,6 +312,7 @@ export function createDealerMotorRouter({
             : typeof req.body.salesName === 'string' && req.body.salesName.trim()
               ? req.body.salesName.trim().slice(0, 120)
               : req.user.name;
+          const spkNumber = await allocateSpkNumber(client, req.user.company_id, details.date);
           const inserted = await client.query(
             `INSERT INTO dealer_motor_spks
                (company_id, branch_id, unit_id, spk_number, submitted_by, sales_name,

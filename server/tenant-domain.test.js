@@ -9,6 +9,8 @@ import {
 describe('tenant subdomains', () => {
   test('normalizes business names into readable subdomain slugs', () => {
     expect(slugifyBusinessName('Dealer Wijaya Abadi')).toBe('dealer-wijaya-abadi');
+    expect(slugifyBusinessName('Usaha Dealer')).toBe('dealer');
+    expect(slugifyBusinessName('Usaha')).toBe('usaha');
     expect(slugifyBusinessName('Toko é & Co.')).toBe('toko-e-co');
     expect(slugifyBusinessName('東京')).toBe('usaha');
   });
@@ -23,13 +25,20 @@ describe('tenant subdomains', () => {
 
   test('resolves legacy tenant aliases to the current short slug', async () => {
     const oldSlug = 'usaha-dealer-6497b6127c474e9db11cdcccd1b4f100';
-    const resolveCanonicalSlug = async (slug) => (slug === oldSlug ? 'usaha-dealer' : null);
+    const resolveCanonicalSlug = async (slug) => (
+      [oldSlug, 'usaha-dealer'].includes(slug) ? 'dealer' : null
+    );
 
     await expect(resolveTenantSlug(
       `${oldSlug}.kelolausaha.store`,
       'kelolausaha.store',
       resolveCanonicalSlug,
-    )).resolves.toBe('usaha-dealer');
+    )).resolves.toBe('dealer');
+    await expect(resolveTenantSlug(
+      'usaha-dealer.kelolausaha.store',
+      'kelolausaha.store',
+      resolveCanonicalSlug,
+    )).resolves.toBe('dealer');
     await expect(resolveTenantSlug(
       'other-business.kelolausaha.store',
       'kelolausaha.store',

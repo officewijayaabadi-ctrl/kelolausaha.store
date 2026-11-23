@@ -917,6 +917,89 @@ app.get('/api/workspace/theme', authenticate, requireTenant, async (req, res, ne
   }
 });
 
+app.get('/api/workspace/profile', authenticate, requireTenant, async (req, res, next) => {
+  try {
+    const result = await pool.query(
+      `SELECT c.name,
+              COALESCE((
+                SELECT b.address
+                FROM business_branches b
+                WHERE b.company_id = c.id AND b.is_primary = true
+                LIMIT 1
+              ), '') AS address,
+              COALESCE(c.theme_settings ->> 'logoUrl', '') AS "logoUrl"
+       FROM companies c
+       WHERE c.id = $1`,
+      [req.user.company_id],
+    );
+    if (!result.rowCount) return res.status(404).json({ message: 'Workspace tidak ditemukan.' });
+    res.json({ profile: result.rows[0] });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.put('/api/workspace/profile', authenticate, requireRole('SUPER ADMIN', 'OWNER'), requireTenant, async (req, res, next) => {
+  const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+  const address = typeof req.body?.address === 'string' ? req.body.address.trim() : '';
+  const logoUrl = typeof req.body?.logoUrl === 'string' ? req.body.logoUrl.trim() : '';
+  const validAsset = !logoUrl
+    || (logoUrl.length <= 500
+      && logoUrl.startsWith(`/uploads/${req.user.company_id}/`)
+      && !logoUrl.includes('..'));
+  if (!name || name.length > 160 || !address || address.length > 500 || !validAsset) {
+    return res.status(400).json({ message: 'Nama, alamat, atau logo usaha tidak valid.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const company = await client.query(
+      `UPDATE companies
+       SET name = $1,
+           theme_settings = jsonb_set(
+             COALESCE(theme_settings, '{}'::jsonb),
+             '{logoUrl}',
+             to_jsonb($2::text),
+             true
+           )
+       WHERE id = $3
+       RETURNING name, theme_settings ->> 'logoUrl' AS "logoUrl"`,
+      [name, logoUrl, req.user.company_id],
+    );
+    if (!company.rowCount) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ message: 'Workspace tidak ditemukan.' });
+    }
+
+    const branch = await client.query(
+      `UPDATE business_branches
+       SET address = $1
+       WHERE company_id = $2 AND is_primary = true
+       RETURNING address`,
+      [address, req.user.company_id],
+    );
+    if (!branch.rowCount) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ message: 'Cabang utama usaha tidak ditemukan.' });
+    }
+
+    await client.query('COMMIT');
+    res.json({
+      profile: {
+        name: company.rows[0].name,
+        address: branch.rows[0].address,
+        logoUrl: company.rows[0].logoUrl || '',
+      },
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    next(error);
+  } finally {
+    client.release();
+  }
+});
+
 app.put('/api/workspace/theme', authenticate, requireRole('SUPER ADMIN', 'OWNER'), requireTenant, async (req, res, next) => {
   const {
     themeId,

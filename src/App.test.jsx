@@ -32,6 +32,32 @@ test('previews the platform-owner console with clearly marked dealer-motor sampl
   expect(screen.getByText('Dealer Motor Wijaya Abadi Mulia')).toBeDefined();
 });
 
+test('lets the owner open business profile management', async () => {
+  render(<App />);
+  openOwnerPreview();
+  fireEvent.change(screen.getByRole('combobox', { name: 'Pilih akun demo' }), {
+    target: { value: 'user-2' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Profil Usaha' }));
+
+  expect(await screen.findByRole('heading', { name: 'Profil Usaha' })).toBeDefined();
+  expect(screen.getByRole('textbox', { name: /Nama usaha/ }).value).toBe('Dealer Motor Wijaya Abadi Mulia');
+  expect(screen.getByRole('textbox', { name: /Alamat usaha/ })).toBeDefined();
+  expect(screen.getByLabelText('Logo usaha')).toBeDefined();
+});
+
+test('lets the Super Admin open business profile management', async () => {
+  render(<App />);
+  openOwnerPreview();
+  fireEvent.change(screen.getByRole('combobox', { name: 'Pilih akun demo' }), {
+    target: { value: 'user-1' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Profil Usaha' }));
+
+  expect(await screen.findByRole('heading', { name: 'Profil Usaha' })).toBeDefined();
+  expect(screen.getByRole('textbox', { name: /Nama usaha/ })).toBeDefined();
+});
+
 test('keeps company bookkeeping and Owner invitations unavailable to Super Admin', () => {
   render(<App />);
   openOwnerPreview();

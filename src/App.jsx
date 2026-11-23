@@ -9,6 +9,7 @@ import { dashboardThemes, defaultThemeSettings, getThemeColors, normalizeThemeSe
 import IndustryDashboard from './IndustryDashboard.jsx';
 import { AttendanceWorkspace, BranchManagement } from './WorkspaceOperations.jsx';
 import { DealerMotorWorkspace, DriverDeliveryWorkspace } from './DealerMotorWorkspace.jsx';
+import { BusinessProfileSettings } from './BusinessProfileSettings.jsx';
 
 const dealerName = 'Dealer Motor Wijaya Abadi Mulia';
 
@@ -24,6 +25,7 @@ function pageFromHash() {
 const roleMenus = {
   'SUPER ADMIN': [
     ['Dashboard', '▦'],
+    ['Profil Usaha', '⌂'],
     ['Struktur Workspace', '☷'],
     ['Cabang', '⌂'],
     ['Absensi', '◷'],
@@ -40,6 +42,7 @@ const roleMenus = {
   ],
   OWNER: [
     ['Dashboard', '▦'],
+    ['Profil Usaha', '⌂'],
     ['Struktur Workspace', '☷'],
     ['Cabang', '⌂'],
     ['Absensi', '◷'],
@@ -232,7 +235,7 @@ function menuPermission(label) {
   if (label === 'Aktivasi') return 'activationManage';
   if (label === 'Semua Usaha') return 'platformBusinesses';
   if (label === 'Pusat Bantuan') return 'supportManage';
-  if (label === 'Tampilan Dashboard') return 'themeManage';
+  if (['Tampilan Dashboard', 'Profil Usaha'].includes(label)) return 'themeManage';
   if (label === 'Absensi') return 'attendanceView';
   if (label === 'Cabang') return 'branchManage';
   return null;
@@ -907,6 +910,12 @@ function App() {
   const [themeNotice, setThemeNotice] = useState('');
   const [themeError, setThemeError] = useState('');
   const [themeSaving, setThemeSaving] = useState(false);
+  const [businessProfile, setBusinessProfile] = useState({ name: '', address: '', logoUrl: '' });
+  const [businessProfileLoading, setBusinessProfileLoading] = useState(false);
+  const [businessProfileSaving, setBusinessProfileSaving] = useState(false);
+  const [businessProfileUploading, setBusinessProfileUploading] = useState(false);
+  const [businessProfileError, setBusinessProfileError] = useState('');
+  const [businessProfileNotice, setBusinessProfileNotice] = useState('');
   const [businessType, setBusinessType] = useState('dealer_motor');
   const [workspaceModules, setWorkspaceModules] = useState(
     businessTypes.dealer_motor.modules.map(([id]) => id),
@@ -1546,7 +1555,6 @@ function App() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             unitId: selectedUnit.id,
-            spkNumber,
             customerName: form.customer,
             customerNik: form.nik,
             customerPhone: form.whatsapp,
@@ -1833,6 +1841,13 @@ function App() {
     const businessName = result.business?.name || (user.role === 'PLATFORM_OWNER' ? 'KelolaUsaha.store' : workspaceName);
     const orderWorkspaceKey = result.business?.id || businessName;
     setWorkspaceName(businessName);
+    setBusinessProfile({
+      name: businessName,
+      address: '',
+      logoUrl: typeof result.business?.themeSettings?.logoUrl === 'string'
+        ? result.business.themeSettings.logoUrl
+        : '',
+    });
     setWorkspaceUrl(targetWorkspaceUrl || '');
     setRestaurantOrderWorkspaceKey(orderWorkspaceKey);
     try {
@@ -1941,7 +1956,7 @@ function App() {
   )).filter(([label]) => label !== 'Aktivasi' || activeUser.role === 'OWNER')
     .filter(([label]) => !billingData?.business?.subscription
     || billingData.business.subscription.status !== 'expired'
-    || ['Aktivasi', 'Dashboard'].includes(label));
+    || ['Aktivasi', 'Dashboard', 'Profil Usaha'].includes(label));
   const menuSections = [
     { title: 'UTAMA', labels: ['Dashboard'] },
     { title: 'OPERASIONAL', labels: ['Kasir', 'Menu Digital', 'Pesanan', 'Daftar Harga', 'Transaksi', 'Nota Digital', 'Aktivasi', 'Input SPK', 'SPK', 'Semua SPK', 'SPK Saya', 'Pengajuan', 'Follow Up', 'Verifikasi SPK', 'Approval', 'Pengiriman'] },
@@ -1950,7 +1965,7 @@ function App() {
     { title: 'KARYAWAN', labels: ['Absensi'] },
     { title: 'LAPORAN', labels: ['Laporan Penjualan', 'Performance', 'Target'] },
     { title: 'PLATFORM', labels: ['Semua Usaha', 'Pusat Bantuan'] },
-    { title: 'PENGATURAN', labels: ['Struktur Workspace', 'Tampilan Dashboard'] },
+    { title: 'PENGATURAN', labels: ['Profil Usaha', 'Struktur Workspace', 'Tampilan Dashboard'] },
   ].map((section) => ({
     ...section,
     items: menus.filter(([label]) => section.labels.includes(label)),
@@ -2075,6 +2090,62 @@ function App() {
       if (stopPaymentChecks) window.clearTimeout(stopPaymentChecks);
     };
   }, [activeUser.id, activeUser.role, isAuthenticated, needsBusinessSetup]);
+
+  useEffect(() => {
+    if (activePage !== 'Profil Usaha' || needsBusinessSetup) return undefined;
+    let cancelled = false;
+    setBusinessProfileError('');
+    setBusinessProfileNotice('');
+
+    if (!isAuthenticated) {
+      if (demoMode) {
+        try {
+          const savedProfile = JSON.parse(localStorage.getItem('ku-demo-business-profile') || 'null');
+          setBusinessProfile(savedProfile
+            && typeof savedProfile.name === 'string'
+            && typeof savedProfile.address === 'string'
+            && typeof savedProfile.logoUrl === 'string'
+            ? savedProfile
+            : { name: dealerName, address: '', logoUrl: '' });
+        } catch (error) {
+          setBusinessProfileError(`Profil demo tidak dapat dimuat: ${error.message}`);
+        }
+      }
+      return undefined;
+    }
+
+    setBusinessProfileLoading(true);
+    const loadBusinessProfile = async () => {
+      try {
+        const response = await fetch('/api/workspace/profile');
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message || 'Profil usaha tidak dapat dimuat.');
+        const profile = result.profile;
+        if (!profile || typeof profile.name !== 'string'
+          || typeof profile.address !== 'string' || typeof profile.logoUrl !== 'string') {
+          throw new Error('Data profil usaha dari server tidak valid.');
+        }
+        if (cancelled) return;
+        setBusinessProfile(profile);
+        setWorkspaceName(profile.name);
+        setThemeSettings((current) => ({ ...current, logoUrl: profile.logoUrl }));
+      } catch (error) {
+        if (!cancelled) setBusinessProfileError(error.message);
+      } finally {
+        if (!cancelled) setBusinessProfileLoading(false);
+      }
+    };
+    loadBusinessProfile();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activePage,
+    activeUser.id,
+    demoMode,
+    isAuthenticated,
+    needsBusinessSetup,
+  ]);
 
   useEffect(() => {
     if (!isAuthenticated || activeUser.role !== 'PLATFORM_OWNER') return undefined;
@@ -2223,15 +2294,15 @@ function App() {
     }
   };
 
-  const changeThemeAsset = async (event, assetType) => {
+  const changeThemeAsset = async (event, assetType, onUploaded, setUploadError = setThemeError) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    setThemeError('');
+    setUploadError('');
     const extension = file.name.split('.').pop().toLowerCase();
     if ((!['image/png', 'image/jpeg', 'image/webp', 'image/x-icon'].includes(file.type)
       && !['png', 'jpg', 'jpeg', 'webp', 'ico'].includes(extension))
       || file.size > 2 * 1024 * 1024) {
-      setThemeError('Pilih PNG, JPG, WebP, atau ICO berukuran maksimal 2 MB.');
+      setUploadError('Pilih PNG, JPG, WebP, atau ICO berukuran maksimal 2 MB.');
       event.target.value = '';
       return;
     }
@@ -2244,18 +2315,102 @@ function App() {
         if (!response.ok) throw new Error(await getApiError(response, 'File tidak dapat diunggah.'));
         const result = await response.json();
         setThemeSettings((current) => ({ ...current, [assetType === 'logo' ? 'logoUrl' : 'faviconUrl']: result.url }));
+        onUploaded?.(result.url);
       } catch (error) {
-        setThemeError(error.message);
+        setUploadError(error.message);
       }
       return;
     }
     const reader = new FileReader();
-    reader.onload = () => setThemeSettings((current) => ({
-      ...current,
-      [assetType === 'logo' ? 'logoUrl' : 'faviconUrl']: String(reader.result),
-    }));
-    reader.onerror = () => setThemeError('Pratinjau gambar tidak dapat dibaca.');
+    reader.onload = () => {
+      const url = String(reader.result);
+      setThemeSettings((current) => ({
+        ...current,
+        [assetType === 'logo' ? 'logoUrl' : 'faviconUrl']: url,
+      }));
+      onUploaded?.(url);
+    };
+    reader.onerror = () => setUploadError('Pratinjau gambar tidak dapat dibaca.');
     reader.readAsDataURL(file);
+  };
+
+  const uploadBusinessLogo = async (event) => {
+    setBusinessProfileError('');
+    setBusinessProfileNotice('');
+    setBusinessProfileUploading(true);
+    try {
+      await changeThemeAsset(
+        event,
+        'logo',
+        (logoUrl) => {
+          setBusinessProfile((current) => ({ ...current, logoUrl }));
+          setBusinessProfileNotice('Logo diunggah. Simpan profil untuk menerapkan perubahan.');
+        },
+        setBusinessProfileError,
+      );
+    } finally {
+      setBusinessProfileUploading(false);
+    }
+  };
+
+  const saveBusinessProfile = async (event) => {
+    event.preventDefault();
+    setBusinessProfileError('');
+    setBusinessProfileNotice('');
+    const profile = {
+      name: businessProfile.name.trim(),
+      address: businessProfile.address.trim(),
+      logoUrl: businessProfile.logoUrl,
+    };
+
+    if (!isAuthenticated) {
+      if (!demoMode) {
+        setBusinessProfileError('Masuk ke workspace untuk menyimpan profil usaha.');
+        return;
+      }
+      try {
+        localStorage.setItem('ku-demo-business-profile', JSON.stringify(profile));
+        setBusinessProfile(profile);
+        setWorkspaceName(profile.name);
+        setBusinessProfileNotice('Profil demo tersimpan pada browser ini.');
+      } catch {
+        setBusinessProfileError('Profil demo tidak dapat disimpan di browser ini.');
+      }
+      return;
+    }
+
+    setBusinessProfileSaving(true);
+    try {
+      const response = await fetch('/api/workspace/profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(profile),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message || 'Profil usaha tidak dapat disimpan.');
+      if (!result.profile || typeof result.profile.name !== 'string'
+        || typeof result.profile.address !== 'string' || typeof result.profile.logoUrl !== 'string') {
+        throw new Error('Data profil usaha dari server tidak valid.');
+      }
+      setBusinessProfile(result.profile);
+      setWorkspaceName(result.profile.name);
+      setThemeSettings((current) => ({ ...current, logoUrl: result.profile.logoUrl }));
+      setBillingData((current) => (current?.business
+        ? {
+          ...current,
+          business: {
+            ...current.business,
+            name: result.profile.name,
+            themeSettings: { ...current.business.themeSettings, logoUrl: result.profile.logoUrl },
+          },
+        }
+        : current));
+      setBusinessProfileNotice('Profil usaha berhasil disimpan.');
+    } catch (error) {
+      setBusinessProfileError(error.message);
+    } finally {
+      setBusinessProfileSaving(false);
+    }
   };
 
   const saveTheme = async () => {
@@ -2610,6 +2765,20 @@ function App() {
             </div>
             <p className="billing-copyright">© 2026 KelolaUsaha.store. Data rekap hanya tersedia untuk Owner platform.</p>
           </section>
+        ) : activePage === 'Profil Usaha' ? (
+          <BusinessProfileSettings
+            canEdit={['OWNER', 'SUPER ADMIN'].includes(activeUser.role)
+              && activeUser.permissions.includes('themeManage')}
+            error={businessProfileError}
+            loading={businessProfileLoading}
+            notice={businessProfileNotice}
+            onLogoUpload={uploadBusinessLogo}
+            onProfileChange={setBusinessProfile}
+            onSave={saveBusinessProfile}
+            profile={businessProfile}
+            saving={businessProfileSaving}
+            uploading={businessProfileUploading}
+          />
         ) : activePage === 'Tampilan Dashboard' ? (
           <section className="content theme-settings-page">
             <div className="page-heading"><div><div className="eyebrow">PENGATURAN <span>/</span> IDENTITAS USAHA</div><h1>Tampilan Dashboard</h1><p>Sesuaikan identitas visual workspace {workspaceName}. Tema tidak mengubah data, modul, atau hak akses.</p></div></div>
@@ -2907,7 +3076,7 @@ function App() {
               <div className="form-section">
                 <div className="section-title"><span className="section-number">01</span><div><h2>Informasi SPK</h2><p>Informasi dasar pengajuan penjualan</p></div></div>
                 <div className="form-grid four-columns">
-                    <label className="field"><span>Nomor SPK</span><input aria-label="Nomor SPK" disabled value={`SPK-WAM-${form.date.replaceAll('-', '')}-${getNextSpkNumber(form.date.replaceAll('-', ''), spks)}`} /></label>
+                    <label className="field"><span>Nomor SPK</span><input aria-label="Nomor SPK" disabled value="Otomatis saat disimpan" /></label>
                   <label className="field"><span>Tanggal SPK <i>*</i></span><input name="date" onChange={updateForm} required type="date" value={form.date} /></label>
                   <label className="field"><span>Unit motor dari stok <i>*</i></span><select name="unitId" onChange={(event) => {
                     const selected = dealerMotorUnits.find((unit) => unit.id === event.target.value);

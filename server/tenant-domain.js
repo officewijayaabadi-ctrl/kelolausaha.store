@@ -7,7 +7,7 @@ export function slugifyBusinessName(name) {
     .replace(/^-+|-+$/g, '')
     .slice(0, 50)
     .replace(/-+$/g, '');
-  return slug || 'usaha';
+  return slug.replace(/^usaha-/, '') || slug || 'usaha';
 }
 
 export function tenantSlugFromHost(hostname, rootDomain) {
