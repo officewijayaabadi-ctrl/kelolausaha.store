@@ -40,6 +40,11 @@ function normalizeUnit(body) {
   const model = typeof body.model === 'string' ? body.model.trim() : '';
   const specification = typeof body.specification === 'string' ? body.specification.trim() : '';
   const color = typeof body.color === 'string' ? body.color.trim() : '';
+  const vehicleCategory = body.vehicleCategory === 'mobil' ? 'mobil' : 'motor';
+  const receivingInvoice = typeof body.receivingInvoice === 'string'
+    ? body.receivingInvoice.trim().slice(0, 100) : '';
+  const supplierName = typeof body.supplierName === 'string'
+    ? body.supplierName.trim().slice(0, 160) : '';
   const frameNumber = typeof body.frameNumber === 'string' ? body.frameNumber.trim().toUpperCase() : '';
   const engineNumber = typeof body.engineNumber === 'string' ? body.engineNumber.trim().toUpperCase() : '';
   const modelYear = Number(body.modelYear);
@@ -52,7 +57,7 @@ function normalizeUnit(body) {
     || !uuidPattern.test(String(body.branchId || ''))
     || !['opening', 'incoming'].includes(body.stockOrigin)
     || !validDate(body.stockEntryDate)) {
-    throw invalid('Lengkapi spesifikasi motor, nomor rangka/mesin, cabang, tanggal, dan harga dengan benar.');
+    throw invalid('Lengkapi spesifikasi kendaraan, nomor rangka/mesin, cabang, tanggal, dan harga dengan benar.');
   }
   return {
     brand,
@@ -66,6 +71,9 @@ function normalizeUnit(body) {
     branchId: body.branchId,
     stockOrigin: body.stockOrigin,
     stockEntryDate: body.stockEntryDate,
+    vehicleCategory,
+    receivingInvoice: receivingInvoice || null,
+    supplierName: supplierName || null,
   };
 }
 
@@ -138,6 +146,13 @@ export function createDealerMotorRouter({
                   u.color, u.frame_number AS "frameNumber", u.engine_number AS "engineNumber",
                   u.otr_price AS "otrPrice", u.stock_origin AS "stockOrigin",
                   u.stock_status AS "stockStatus",
+                  u.vehicle_category AS "vehicleCategory",
+                  u.receiving_invoice AS "receivingInvoice",
+                  u.supplier_name AS "supplierName",
+                  u.inspection_status AS "inspectionStatus",
+                  u.scratch_status AS "scratchStatus",
+                  u.pdi_status AS "pdiStatus",
+                  u.handover_status AS "handoverStatus",
                   to_char(u.stock_entry_date, 'YYYY-MM-DD') AS "stockEntryDate",
                   u.status_updated_at AS "statusUpdatedAt", u.created_at AS "createdAt"
            FROM dealer_motor_units u
@@ -191,17 +206,22 @@ export function createDealerMotorRouter({
           const inserted = await client.query(
             `INSERT INTO dealer_motor_units
                (company_id, branch_id, created_by, brand, model, specification, model_year,
-                color, frame_number, engine_number, otr_price, stock_origin, stock_entry_date)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                color, frame_number, engine_number, otr_price, stock_origin, stock_entry_date,
+                vehicle_category, receiving_invoice, supplier_name)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
              RETURNING id, branch_id AS "branchId", brand, model, specification,
                        model_year AS "modelYear", color, frame_number AS "frameNumber",
                        engine_number AS "engineNumber", otr_price AS "otrPrice",
                        stock_origin AS "stockOrigin", stock_status AS "stockStatus",
+                       vehicle_category AS "vehicleCategory",
+                       receiving_invoice AS "receivingInvoice",
+                       supplier_name AS "supplierName",
                        to_char(stock_entry_date, 'YYYY-MM-DD') AS "stockEntryDate",
                        status_updated_at AS "statusUpdatedAt", created_at AS "createdAt"`,
             [req.user.company_id, unit.branchId, req.user.id, unit.brand, unit.model,
               unit.specification, unit.modelYear, unit.color, unit.frameNumber,
-              unit.engineNumber, unit.otrPrice, unit.stockOrigin, unit.stockEntryDate],
+              unit.engineNumber, unit.otrPrice, unit.stockOrigin, unit.stockEntryDate,
+              unit.vehicleCategory, unit.receivingInvoice, unit.supplierName],
           );
           const event = await client.query(
             `INSERT INTO dealer_motor_unit_events
@@ -486,7 +506,8 @@ export function createDealerMotorRouter({
           await client.query(
             `UPDATE dealer_motor_spks
              SET status = 'DISETUJUI', delivery_status = 'ready',
-                 approved_by = $1, updated_at = now()
+                 approved_by = $1, waybill_number = 'SJ-' || substring(spk_number FROM 5),
+                 waybill_issued_at = now(), waybill_issued_by = $1, updated_at = now()
              WHERE id = $2 AND company_id = $3`,
             [req.user.id, req.params.id, req.user.company_id],
           );
@@ -499,6 +520,7 @@ export function createDealerMotorRouter({
           return {
             id: spkResult.rows[0].id,
             spkNumber: spkResult.rows[0].spkNumber,
+            waybillNumber: spkResult.rows[0].spkNumber.replace(/^SPK-/, 'SJ-'),
             status: 'DISETUJUI',
             deliveryStatus: 'ready',
           };
@@ -519,6 +541,8 @@ export function createDealerMotorRouter({
           `SELECT s.id, s.spk_number AS "spkNumber", s.customer_name AS "customerName",
                   s.customer_phone AS "customerPhone", s.customer_address AS "customerAddress",
                   s.delivery_status AS "deliveryStatus", s.driver_id AS "driverId",
+                  s.waybill_number AS "waybillNumber",
+                  s.waybill_issued_at AS "waybillIssuedAt",
                   s.created_at AS "createdAt", u.brand, u.model, u.specification,
                   u.model_year AS "modelYear", u.color,
                   u.frame_number AS "frameNumber", u.engine_number AS "engineNumber"
@@ -551,6 +575,13 @@ export function createDealerMotorRouter({
             [req.params.id, req.user.company_id, canViewAllBranches, req.user.branch_id],
           );
           if (!result.rowCount) throw invalid('Pengiriman sudah diambil atau tidak tersedia.', 409);
+          const activeTask = await client.query(
+            `SELECT id FROM dealer_motor_spks
+             WHERE company_id = $1 AND driver_id = $2 AND delivery_status = 'in_delivery'
+             LIMIT 1`,
+            [req.user.company_id, req.user.id],
+          );
+          if (activeTask.rowCount) throw invalid('Selesaikan tugas pengiriman yang sedang Anda tangani sebelum mengambil tugas baru.', 409);
           await client.query(
             `UPDATE dealer_motor_spks
              SET delivery_status = 'in_delivery', status = 'DALAM PENGIRIMAN',

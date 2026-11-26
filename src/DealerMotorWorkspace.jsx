@@ -3,6 +3,9 @@ import { useEffect, useState } from 'react';
 const today = () => new Date().toISOString().slice(0, 10);
 const emptyUnit = () => ({
   branchId: '',
+  vehicleCategory: 'motor',
+  receivingInvoice: '',
+  supplierName: '',
   brand: '',
   model: '',
   specification: '',
@@ -99,7 +102,10 @@ export function DealerMotorWorkspace({
         <div className="section-title"><span className="section-number">01</span><div><h2>Tambah unit motor</h2><p>Masukkan unit stok awal atau motor yang baru masuk.</p></div></div>
         <div className="form-grid four-columns">
           <label className="field"><span>Cabang <i>*</i></span><select name="branchId" onChange={update} required value={draft.branchId}><option value="">Pilih cabang</option>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>
-          <label className="field"><span>Jenis pencatatan <i>*</i></span><select name="stockOrigin" onChange={update} value={draft.stockOrigin}><option value="opening">Stok awal</option><option value="incoming">Motor masuk</option></select></label>
+          <label className="field"><span>Jenis kendaraan <i>*</i></span><select name="vehicleCategory" onChange={update} value={draft.vehicleCategory}><option value="motor">Sepeda motor</option><option value="mobil">Mobil</option></select></label>
+          <label className="field"><span>No. faktur penerimaan</span><input maxLength="100" name="receivingInvoice" onChange={update} value={draft.receivingInvoice} /></label>
+          <label className="field"><span>Supplier / main dealer</span><input maxLength="160" name="supplierName" onChange={update} value={draft.supplierName} /></label>
+          <label className="field"><span>Jenis pencatatan <i>*</i></span><select name="stockOrigin" onChange={update} value={draft.stockOrigin}><option value="opening">Stok awal</option><option value="incoming">Kendaraan masuk</option></select></label>
           <label className="field"><span>Tanggal masuk <i>*</i></span><input name="stockEntryDate" onChange={update} required type="date" value={draft.stockEntryDate} /></label>
           <label className="field"><span>Merek <i>*</i></span><input maxLength="80" name="brand" onChange={update} required value={draft.brand} /></label>
           <label className="field"><span>Model motor <i>*</i></span><input maxLength="120" name="model" onChange={update} required value={draft.model} /></label>
@@ -115,11 +121,13 @@ export function DealerMotorWorkspace({
     </form>}
     <section className="table-card full-table">
       <div className="table-heading"><div><h2>Daftar unit</h2><p>{units.length} unit tercatat</p></div></div>
-      <div className="table-scroll"><table><thead><tr><th>TANGGAL MASUK</th><th>CABANG</th><th>MOTOR</th><th>TAHUN / WARNA</th><th>NO. RANGKA</th><th>NO. MESIN</th><th>HARGA OTR</th><th>STATUS</th><th>MUTASI TERAKHIR</th></tr></thead><tbody>
+      <div className="table-scroll"><table><thead><tr><th>TANGGAL MASUK</th><th>CABANG</th><th>JENIS</th><th>KENDARAAN</th><th>TAHUN / WARNA</th><th>NO. RANGKA</th><th>NO. MESIN</th><th>FAKTUR</th><th>SUPPLIER</th><th>HARGA OTR</th><th>STATUS</th><th>MUTASI TERAKHIR</th></tr></thead><tbody>
         {units.map((unit) => <tr key={unit.id}>
           <td>{unit.stockEntryDate}</td><td>{unit.branchName || '—'}</td>
+          <td>{unit.vehicleCategory === 'mobil' ? 'Mobil' : 'Sepeda motor'}</td>
           <td>{unit.brand} {unit.model} {unit.specification}</td>
           <td>{unit.modelYear} / {unit.color}</td><td>{unit.frameNumber}</td><td>{unit.engineNumber}</td>
+          <td>{unit.receivingInvoice || '—'}</td><td>{unit.supplierName || '—'}</td>
           <td className="amount">{rupiah(unit.otrPrice)}</td>
           <td>{unit.stockStatus === 'available' ? 'Tersedia'
             : unit.stockStatus === 'reserved' ? 'SPK diproses'
@@ -127,7 +135,7 @@ export function DealerMotorWorkspace({
               : unit.stockStatus === 'in_delivery' ? 'Dalam proses kirim' : 'Terkirim'}</td>
           <td>{dateTime(unit.statusUpdatedAt)}</td>
         </tr>)}
-        {!units.length && <tr><td colSpan="9">Belum ada unit. Tambahkan stok awal atau motor masuk.</td></tr>}
+        {!units.length && <tr><td colSpan="12">Belum ada unit. Tambahkan stok awal atau kendaraan masuk.</td></tr>}
       </tbody></table></div>
     </section>
     <section className="table-card full-table">
@@ -234,7 +242,7 @@ export function DriverDeliveryWorkspace({ isAuthenticated, notice }) {
   };
 
   return <section className="content">
-    <div className="page-heading"><div><div className="eyebrow">PENJUALAN <span>/</span> PENGIRIMAN</div><h1>Pengiriman motor</h1><p>Ambil SPK yang sudah disetujui, lalu unggah foto serah-terima dan lokasi GPS pembeli.</p></div></div>
+    <div className="page-heading"><div><div className="eyebrow">PENJUALAN <span>/</span> PENGIRIMAN</div><h1>Pengiriman kendaraan</h1><p>Pilih sendiri tugas dari Surat Jalan yang sudah diterbitkan, lalu unggah foto serah-terima dan lokasi GPS pembeli.</p></div></div>
     {notice && <div className="notice" role="status">{notice}</div>}
     {message && <div className="notice" role="status">{message}</div>}
     {error && <div className="notice error-notice" role="alert">{error}</div>}
@@ -243,10 +251,11 @@ export function DriverDeliveryWorkspace({ isAuthenticated, notice }) {
     <div className="delivery-list">
       {deliveries.map((delivery) => <article className="table-card delivery-card" key={delivery.id}>
         <div className="section-heading"><div><h2>{delivery.spkNumber} · {delivery.customerName}</h2><p>{delivery.brand} {delivery.model} {delivery.specification} · {delivery.color}</p></div>
-          <strong>{delivery.deliveryStatus === 'ready' ? 'Siap diambil' : 'Dalam proses kirim'}</strong></div>
+          <strong>{delivery.deliveryStatus === 'ready' ? 'Tersedia untuk diambil' : 'Tugas Anda'}</strong></div>
         <p>{delivery.customerPhone} · {delivery.customerAddress}</p>
+        <p><strong>Surat Jalan:</strong> {delivery.waybillNumber || '—'} · <strong>SPK:</strong> {delivery.spkNumber}</p>
         {delivery.deliveryStatus === 'ready'
-          ? <button className="button button-primary" disabled={busyId === delivery.id} onClick={() => claim(delivery)} type="button">Ambil pengiriman</button>
+          ? <button className="button button-primary" disabled={busyId === delivery.id} onClick={() => claim(delivery)} type="button">Ambil tugas sendiri <span>→</span></button>
           : <form onSubmit={(event) => submitProof(event, delivery)}>
             <label className="field"><span>Foto serah-terima pembeli <i>*</i></span><input accept="image/jpeg,image/png,image/webp" capture="environment" onChange={(event) => setProofFiles((current) => ({ ...current, [delivery.id]: event.target.files?.[0] || null }))} required type="file" /></label>
             <button className="button button-primary" disabled={busyId === delivery.id} type="submit">{busyId === delivery.id ? 'Menyimpan…' : 'Kirim bukti & lokasi GPS'}</button>

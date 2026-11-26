@@ -542,9 +542,20 @@ td .spk-id { color: #316d50; font-size: 9px; }
 .workflow-status-row i span { display: block; height: 100%; border-radius: inherit; background: #df5965; }
 .empty-state { margin: 0; padding: 20px; color: var(--muted); }
 .industry-dashboard .status-badge { text-transform: capitalize; }
+.dealer-process-panel { margin: 4px 0 22px; }
+.dealer-process-panel .section-heading { margin-bottom: 12px; }
+.dealer-process-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.dealer-process-grid article { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 82px; padding: 14px; border: 1px solid color-mix(in srgb, var(--theme-primary, #ef4444) 14%, #e5eaf0); border-radius: 12px; background: linear-gradient(135deg, #fff, color-mix(in srgb, var(--theme-secondary, #fff1f2) 48%, #fff)); box-shadow: 0 8px 22px rgba(31, 48, 72, 0.06); }
+.dealer-process-icon { display: grid; width: 38px; height: 38px; place-items: center; border-radius: 10px; color: #fff; background: var(--theme-primary, #ef4444); font-size: 11px; font-weight: 800; box-shadow: 0 7px 16px color-mix(in srgb, var(--theme-primary, #ef4444) 24%, transparent); }
+.dealer-process-grid article div { display: grid; gap: 4px; min-width: 0; }
+.dealer-process-grid article strong { color: #263747; font-size: 12px; line-height: 1.35; }
+.dealer-process-grid article small { color: #7b8996; font-size: 10px; }
+.dealer-process-grid article b { min-width: 38px; color: var(--theme-primary, #ef4444); font-size: 23px; text-align: right; }
+.dealer-kpi-primary { border-top: 3px solid var(--theme-primary, #ef4444); }
 
 @media (max-width: 700px) {
   .dashboard-insights { grid-template-columns: minmax(0, 1fr); }
+  .dealer-process-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .workspace-module-grid { padding: 14px; }
   .workspace-structure-actions { flex-direction: column-reverse; padding: 0 14px; }
   .workspace-structure-actions .button { width: 100%; justify-content: center; }
@@ -932,13 +943,14 @@ td .spk-id { color: #316d50; font-size: 9px; }
 .theme-settings-page { max-width: 1200px; }
 .theme-settings-card { margin-bottom: 15px; overflow: hidden; border: 1px solid #e7ece9; border-radius: 8px; background: #fff; }
 .theme-choice-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; padding: 0 16px 16px; }
-.theme-choice { overflow: hidden; padding: 0; border: 1px solid #e5ebe6; border-radius: 7px; color: #43544a; background: #fff; text-align: left; }
-.theme-choice.selected { border-color: var(--theme-primary, #2866d7); box-shadow: 0 0 0 2px color-mix(in srgb, var(--theme-primary, #2866d7) 20%, white); }
-.theme-choice-preview { position: relative; display: flex; height: 57px; flex-direction: column; justify-content: center; gap: 5px; padding-left: 32%; background: var(--swatch-support); }
+.theme-choice { overflow: hidden; padding: 0; border: 1px solid #e5ebe6; border-radius: 10px; color: #43544a; background: #fff; text-align: left; transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease; }
+.theme-choice:not(:disabled):hover { transform: translateY(-3px); border-color: var(--swatch-primary, var(--theme-primary, #2866d7)); box-shadow: 0 10px 24px rgba(25, 43, 74, 0.12); }
+.theme-choice.selected { border-color: var(--swatch-primary, var(--theme-primary, #2866d7)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--swatch-primary, var(--theme-primary, #2866d7)) 24%, white), 0 10px 24px rgba(25, 43, 74, 0.10); }
+.theme-choice-preview { position: relative; display: flex; height: 64px; flex-direction: column; justify-content: center; gap: 5px; padding-left: 32%; background: linear-gradient(135deg, var(--swatch-support), #ffffff); }
 .theme-choice-preview i { display: block; width: 53%; height: 5px; border-radius: 4px; background: #fff; }
 .theme-choice-preview i:nth-child(2) { width: 70%; }
 .theme-choice-preview i:nth-child(3) { width: 43%; }
-.theme-choice-preview b { position: absolute; inset: 0 auto 0 0; width: 23%; background: var(--swatch-primary); }
+.theme-choice-preview b { position: absolute; inset: 0 auto 0 0; width: 23%; background: linear-gradient(180deg, var(--swatch-primary), color-mix(in srgb, var(--swatch-primary) 78%, #101827)); }
 .theme-choice-label { display: flex; min-height: 34px; align-items: center; gap: 6px; padding: 7px; }
 .theme-choice-label small { color: #95a198; font-size: 8px; }
 .theme-choice-label strong { overflow: hidden; color: #43544a; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }

@@ -153,7 +153,7 @@ test('customizes and saves a company dashboard theme in the demo browser', () =>
     target: { value: 'user-1' },
   });
   fireEvent.click(screen.getByRole('button', { name: 'Tampilan Dashboard' }));
-  fireEvent.click(screen.getByRole('button', { name: /Navy Elegan/ }));
+  fireEvent.click(screen.getByRole('button', { name: /Midnight Blue/ }));
   fireEvent.change(screen.getByLabelText('Tampilan sidebar'), { target: { value: 'mini' } });
   fireEvent.change(screen.getByLabelText('Gaya kartu statistik'), { target: { value: 'soft' } });
   fireEvent.click(screen.getByRole('button', { name: /simpan tampilan/i }));

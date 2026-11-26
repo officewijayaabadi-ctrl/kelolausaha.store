@@ -1,5 +1,17 @@
 {
   "compilerOptions": {
-    "moduleResolution": "node"
-  }
+    "allowJs": true,
+    "checkJs": false,
+    "jsx": "react-jsx",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "resolveJsonModule": true,
+    "target": "ES2022",
+    "baseUrl": "."
+  },
+  "include": [
+    "src/**/*",
+    "shared/**/*",
+    "vite.config.js"
+  ]
 }

@@ -79,6 +79,8 @@ export default function IndustryDashboard({
   }, []);
 
   const summary = data?.summary || {};
+  const isDealer = ['dealer_motor', 'dealer_vehicle'].includes(businessType);
+  const dealer = data?.dealerMetrics || {};
   const statuses = new Map((data?.statuses || []).map((item) => [item.status, item.count]));
   const statusLabels = new Map(workflow.statuses);
   const visibleStatuses = workflow.statuses.filter(([status]) => statuses.has(status));
@@ -113,18 +115,35 @@ export default function IndustryDashboard({
           <div className="banner-decoration">KU</div>
         </div>
 
+        {isDealer && <section className="dealer-process-panel" aria-label="Monitoring proses kendaraan">
+          <div className="section-heading"><div><h2>Monitoring proses kendaraan</h2><p>Pergerakan unit dari penerimaan sampai serah terima</p></div></div>
+          <div className="dealer-process-grid">
+            <article><span className="dealer-process-icon">01</span><div><strong>SPK menunggu persetujuan</strong><small>Validasi Supervisor</small></div><b>{dealer.spksAwaitingApproval || 0}</b></article>
+            <article><span className="dealer-process-icon">02</span><div><strong>Unit menunggu alokasi</strong><small>Kendaraan tersedia</small></div><b>{dealer.availableUnits || 0}</b></article>
+            <article><span className="dealer-process-icon">03</span><div><strong>Menunggu gesek rangka</strong><small>Verifikasi identitas unit</small></div><b>{dealer.approvedSpks || 0}</b></article>
+            <article><span className="dealer-process-icon">04</span><div><strong>Siap serah terima</strong><small>Surat jalan diterbitkan</small></div><b>{dealer.readyDeliveryUnits || 0}</b></article>
+          </div>
+        </section>}
+
         <div className="section-heading"><div><h2>Ringkasan usaha</h2><p>Angka dari transaksi dan stok workspace</p></div></div>
         <div className="stats-grid">
-          {isOwner && <article className="stat-card stat-shadow"><div className="stat-top"><span>Penjualan hari ini</span><span className="stat-icon blue">Rp</span></div><strong>{formatCurrency(data.financials?.salesToday)}</strong><div className="stat-foot"><span>Transaksi dibuat hari ini</span></div></article>}
-          {isOwner && <article className="stat-card stat-shadow"><div className="stat-top"><span>Penjualan bulan ini</span><span className="stat-icon green">↗</span></div><strong>{formatCurrency(data.financials?.salesMonth)}</strong><div className="stat-foot"><span>Bulan berjalan</span></div></article>}
-          <article className="stat-card stat-shadow"><div className="stat-top"><span>Pesanan hari ini</span><span className="stat-icon blue">▤</span></div><strong>{summary.ordersToday || 0}</strong><div className="stat-foot"><span>Pesanan baru</span></div></article>
-          <article className="stat-card stat-shadow"><div className="stat-top"><span>Pesanan aktif</span><span className="stat-icon orange">◷</span></div><strong>{summary.activeOrders || 0}</strong><div className="stat-foot"><span>Masih dalam proses</span></div></article>
-          <article className="stat-card stat-shadow"><div className="stat-top"><span>Stok perlu diperiksa</span><span className="stat-icon purple">!</span></div><strong>{summary.lowStockProducts || 0}</strong><div className="stat-foot"><span>Produk mencapai batas minimum</span></div></article>
-          {isOwner && <article className="stat-card stat-shadow"><div className="stat-top"><span>Piutang berjalan</span><span className="stat-icon orange">Rp</span></div><strong>{formatCurrency(data.financials?.receivables)}</strong><div className="stat-foot"><span>{summary.unpaidOrders || 0} transaksi belum lunas</span></div></article>}
-          {isOwner && <article className="stat-card stat-shadow"><div className="stat-top"><span>Pemasukan tercatat</span><span className="stat-icon green">＋</span></div><strong>{formatCurrency(data.financials?.ledgerIncome)}</strong><div className="stat-foot"><span>Pembukuan bulan ini</span></div></article>}
-          {isOwner && <article className="stat-card stat-shadow"><div className="stat-top"><span>Pengeluaran tercatat</span><span className="stat-icon orange">−</span></div><strong>{formatCurrency(data.financials?.ledgerExpense)}</strong><div className="stat-foot"><span>Pembukuan bulan ini</span></div></article>}
-          {isOwner && <article className="stat-card stat-shadow"><div className="stat-top"><span>Laba / rugi pembukuan</span><span className="stat-icon purple">Rp</span></div><strong>{formatCurrency(data.financials?.netProfit)}</strong><div className="stat-foot"><span>Pemasukan dikurangi pengeluaran</span></div></article>}
-          {!isOwner && <article className="stat-card stat-shadow"><div className="stat-top"><span>Transaksi belum lunas</span><span className="stat-icon orange">◷</span></div><strong>{summary.unpaidOrders || 0}</strong><div className="stat-foot"><span>Perlu tindak lanjut kasir</span></div></article>}
+          {isDealer ? <>
+            <article className="stat-card stat-shadow dealer-kpi-primary"><div className="stat-top"><span>Total stok kendaraan</span><span className="stat-icon blue">K</span></div><strong>{dealer.totalUnits || 0}</strong><div className="stat-foot"><span>{dealer.availableUnits || 0} unit siap dijual</span></div></article>
+            <article className="stat-card stat-shadow"><div className="stat-top"><span>SPK aktif</span><span className="stat-icon orange">SPK</span></div><strong>{dealer.activeSpks || 0}</strong><div className="stat-foot"><span>{dealer.approvedSpks || 0} sudah disetujui</span></div></article>
+            <article className="stat-card stat-shadow"><div className="stat-top"><span>SPK bulan ini</span><span className="stat-icon green">↗</span></div><strong>{dealer.spksMonth || 0}</strong><div className="stat-foot"><span>{dealer.cashSpks || 0} tunai · {dealer.creditSpks || 0} kredit</span></div></article>
+            <article className="stat-card stat-shadow"><div className="stat-top"><span>Siap / dalam pengiriman</span><span className="stat-icon purple">D</span></div><strong>{(dealer.readyDeliveryUnits || 0) + (dealer.inDeliveryUnits || 0)}</strong><div className="stat-foot"><span>{dealer.readyDeliveryUnits || 0} siap · {dealer.inDeliveryUnits || 0} dikirim</span></div></article>
+          </> : <>
+            {isOwner && <article className="stat-card stat-shadow"><div className="stat-top"><span>Penjualan hari ini</span><span className="stat-icon blue">Rp</span></div><strong>{formatCurrency(data.financials?.salesToday)}</strong><div className="stat-foot"><span>Transaksi dibuat hari ini</span></div></article>}
+            {isOwner && <article className="stat-card stat-shadow"><div className="stat-top"><span>Penjualan bulan ini</span><span className="stat-icon green">↗</span></div><strong>{formatCurrency(data.financials?.salesMonth)}</strong><div className="stat-foot"><span>Bulan berjalan</span></div></article>}
+            <article className="stat-card stat-shadow"><div className="stat-top"><span>Pesanan hari ini</span><span className="stat-icon blue">▤</span></div><strong>{summary.ordersToday || 0}</strong><div className="stat-foot"><span>Pesanan baru</span></div></article>
+            <article className="stat-card stat-shadow"><div className="stat-top"><span>Pesanan aktif</span><span className="stat-icon orange">◷</span></div><strong>{summary.activeOrders || 0}</strong><div className="stat-foot"><span>Masih dalam proses</span></div></article>
+            <article className="stat-card stat-shadow"><div className="stat-top"><span>Stok perlu diperiksa</span><span className="stat-icon purple">!</span></div><strong>{summary.lowStockProducts || 0}</strong><div className="stat-foot"><span>Produk mencapai batas minimum</span></div></article>
+            {isOwner && <article className="stat-card stat-shadow"><div className="stat-top"><span>Piutang berjalan</span><span className="stat-icon orange">Rp</span></div><strong>{formatCurrency(data.financials?.receivables)}</strong><div className="stat-foot"><span>{summary.unpaidOrders || 0} transaksi belum lunas</span></div></article>}
+            {isOwner && <article className="stat-card stat-shadow"><div className="stat-top"><span>Pemasukan tercatat</span><span className="stat-icon green">＋</span></div><strong>{formatCurrency(data.financials?.ledgerIncome)}</strong><div className="stat-foot"><span>Pembukuan bulan ini</span></div></article>}
+            {isOwner && <article className="stat-card stat-shadow"><div className="stat-top"><span>Pengeluaran tercatat</span><span className="stat-icon orange">−</span></div><strong>{formatCurrency(data.financials?.ledgerExpense)}</strong><div className="stat-foot"><span>Pembukuan bulan ini</span></div></article>}
+            {isOwner && <article className="stat-card stat-shadow"><div className="stat-top"><span>Laba / rugi pembukuan</span><span className="stat-icon purple">Rp</span></div><strong>{formatCurrency(data.financials?.netProfit)}</strong><div className="stat-foot"><span>Pemasukan dikurangi pengeluaran</span></div></article>}
+            {!isOwner && <article className="stat-card stat-shadow"><div className="stat-top"><span>Transaksi belum lunas</span><span className="stat-icon orange">◷</span></div><strong>{summary.unpaidOrders || 0}</strong><div className="stat-foot"><span>Perlu tindak lanjut kasir</span></div></article>}
+          </>}
         </div>
 
         <div className="dashboard-insights">

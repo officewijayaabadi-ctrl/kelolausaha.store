@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import QRCode from 'qrcode';
 import { io } from 'socket.io-client';
@@ -528,6 +528,10 @@ const priceCatalogs = {
     { id: 'beat-deluxe', name: 'Honda Beat Deluxe', unit: 'unit', price: 19800000 },
     { id: 'vario-160', name: 'Honda Vario 160', unit: 'unit', price: 28750000 },
     { id: 'scoopy', name: 'Honda Scoopy', unit: 'unit', price: 22400000 },
+  ],
+  dealer_vehicle: [
+    { id: 'motor-unit', name: 'Sepeda motor', unit: 'unit', price: 25000000 },
+    { id: 'car-unit', name: 'Mobil', unit: 'unit', price: 250000000 },
   ],
   retail: [
     { id: 'retail-product', name: 'Produk retail', unit: 'pcs', price: 25000 },
@@ -1076,6 +1080,7 @@ function App() {
   const [themeNotice, setThemeNotice] = useState('');
   const [themeError, setThemeError] = useState('');
   const [themeSaving, setThemeSaving] = useState(false);
+  const themeLoadedRef = useRef(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [accountProfileOpen, setAccountProfileOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -1113,7 +1118,14 @@ function App() {
   const [memberDecisionBusy, setMemberDecisionBusy] = useState('');
   const [paymentType, setPaymentType] = useState('CREDIT');
   const [priceItems, setPriceItems] = useState(priceCatalogs.dealer_motor);
-  const [priceDraft, setPriceDraft] = useState({ name: '', unit: '', price: '' });
+  const [priceDraft, setPriceDraft] = useState({
+    name: '',
+    unit: '',
+    price: '',
+    stock: '0',
+    minimumStock: '0',
+    stockTracked: false,
+  });
   const [cart, setCart] = useState([]);
   const [posCustomer, setPosCustomer] = useState('');
   const [posWhatsApp, setPosWhatsApp] = useState('');
@@ -1439,20 +1451,51 @@ function App() {
       : current.map((item) => item.id === itemId ? { ...item, quantity } : item));
   };
 
-  const addPriceItem = (event) => {
+  const addPriceItem = async (event) => {
     event.preventDefault();
     const newItem = {
       id: `price-${Date.now()}`,
       name: priceDraft.name.trim(),
       unit: priceDraft.unit.trim(),
       price: Number(priceDraft.price),
+      stock: Number(priceDraft.stock) || 0,
+      minimumStock: Number(priceDraft.minimumStock) || 0,
+      stockTracked: priceDraft.stockTracked,
+      stockIn: priceDraft.stockTracked ? (Number(priceDraft.stock) || 0) : 0,
+      stockOut: 0,
     };
-    if (!newItem.name || !newItem.unit || newItem.price <= 0) {
-      setNotice('Lengkapi nama, satuan, dan harga lebih dari nol.');
+    if (!newItem.name || !newItem.unit || newItem.price <= 0
+      || newItem.stock < 0 || newItem.minimumStock < 0) {
+      setNotice('Lengkapi nama, satuan, harga, dan nilai stok dengan benar.');
       return;
     }
+    if (isAuthenticated) {
+      try {
+        const response = await fetch('/api/operations/products', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: newItem.name,
+            unit: newItem.unit,
+            costPrice: 0,
+            sellingPrice: newItem.price,
+            stock: newItem.stock,
+            minimumStock: newItem.minimumStock,
+            stockTracked: newItem.stockTracked,
+            itemType: newItem.stockTracked ? 'product' : 'service',
+          }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message || 'Produk tidak dapat disimpan.');
+        newItem.id = result.product.id;
+        newItem.stock = Number(result.product.stock) || 0;
+      } catch (error) {
+        setNotice(error.message);
+        return;
+      }
+    }
     setPriceItems((current) => [...current, newItem]);
-    setPriceDraft({ name: '', unit: '', price: '' });
+    setPriceDraft({ name: '', unit: '', price: '', stock: '0', minimumStock: '0', stockTracked: false });
     setNotice(`${newItem.name} berhasil ditambahkan ke daftar harga.`);
   };
 
@@ -1460,6 +1503,12 @@ function App() {
     event.preventDefault();
     if (cart.length === 0) {
       setNotice('Tambahkan minimal satu produk atau jasa ke transaksi.');
+      return;
+    }
+    const insufficientItem = cart.find((item) => item.stockTracked
+      && Number(item.stock) < Number(item.quantity));
+    if (insufficientItem) {
+      setNotice(`Stok ${insufficientItem.name} tidak mencukupi. Stok tersedia ${insufficientItem.stock} ${insufficientItem.unit}.`);
       return;
     }
     const dateCode = getToday().replaceAll('-', '');
@@ -1480,6 +1529,17 @@ function App() {
       createdAt: new Date().toISOString(),
     };
     setPosTransactions((current) => [transaction, ...current]);
+    setPriceItems((current) => current.map((item) => {
+      if (!item.stockTracked) return item;
+      const sold = cart.find((cartItem) => cartItem.id === item.id);
+      if (!sold) return item;
+      const quantity = Number(sold.quantity) || 0;
+      return {
+        ...item,
+        stock: Math.max(0, Number(item.stock) - quantity),
+        stockOut: (Number(item.stockOut) || 0) + quantity,
+      };
+    }));
     setCart([]);
     setPosCustomer('');
     setPosWhatsApp('');
@@ -2208,6 +2268,8 @@ function App() {
   const ownerTrialCountdown = ownerTrialEnd ? getCountdown(ownerTrialEnd, countdownNow) : null;
   const activeThemeColors = getThemeColors(themeSettings);
   const receiptSettings = themeSettings.receiptSettings || defaultThemeSettings.receiptSettings;
+  const canManageTheme = ['OWNER', 'SUPER ADMIN'].includes(activeUser.role)
+    && activeUser.permissions.includes('themeManage');
   const activeReceiptAccent = receiptAccents.find(({ id }) => id === receiptSettings.accent) || receiptAccents[0];
   const availableAccessModules = accessModules.filter(({ id }) => (
     !platformAccessPermissions.has(id)
@@ -2227,7 +2289,7 @@ function App() {
     paymentStatus: 'LUNAS',
     paymentMethod: 'Tunai',
   }, workspaceName, receiptSettings).svg)}`;
-  const canApproveSpk = businessType === 'dealer_motor'
+  const canApproveSpk = ['dealer_motor', 'dealer_vehicle'].includes(businessType)
     && workspaceModules.includes('sales_orders')
     && activeUser.permissions.includes('spkApprove');
   const pendingApprovalCount = spks.filter((item) => item.status === 'APPROVAL SVP').length;
@@ -2260,7 +2322,7 @@ function App() {
   };
   const menus = getUserMenus(activeUser).filter(([label]) => (
     (!enabledMenus[label] || workspaceModules.includes(enabledMenus[label]))
-    && (businessType === 'dealer_motor' || !dealerOnlyMenus.has(label))
+    && (['dealer_motor', 'dealer_vehicle'].includes(businessType) || !dealerOnlyMenus.has(label))
     && (label !== 'Pesanan' || businessType === 'restaurant')
     && (label !== 'Pengiriman' || activeUser.role === 'DRIVER')
   )).filter(([label]) => label !== 'Aktivasi' || activeUser.role === 'OWNER')
@@ -2637,8 +2699,10 @@ function App() {
         else if (activeUser.role === 'OWNER') {
           setBillingData(data);
           setThemeSettings(normalizeThemeSettings(data.business.themeSettings, data.business.type));
+          themeLoadedRef.current = true;
         } else {
           setThemeSettings(normalizeThemeSettings(data.themeSettings, data.businessType));
+          themeLoadedRef.current = true;
         }
         setBillingError('');
       } catch (error) {
@@ -2779,6 +2843,47 @@ function App() {
       cancelled = true;
     };
   }, [activeUser.id, activeUser.role, isAuthenticated]);
+
+  useEffect(() => {
+    if (!isAuthenticated || needsBusinessSetup) return undefined;
+    let cancelled = false;
+    const loadOperationsCatalog = async () => {
+      try {
+        const response = await fetch('/api/operations');
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message || 'Katalog produk tidak dapat dimuat.');
+        if (!Array.isArray(result.products)) throw new Error('Data katalog dari server tidak valid.');
+        const movements = Array.isArray(result.inventoryMovements) ? result.inventoryMovements : [];
+        const stockMovements = new Map();
+        movements.forEach((movement) => {
+          const quantity = Number(movement.quantity) || 0;
+          const totals = stockMovements.get(movement.productId) || { stockIn: 0, stockOut: 0 };
+          if (quantity > 0) totals.stockIn += quantity;
+          if (quantity < 0) totals.stockOut += Math.abs(quantity);
+          stockMovements.set(movement.productId, totals);
+        });
+        if (!cancelled) {
+          setPriceItems(result.products.map((product) => ({
+            id: product.id,
+            name: product.name,
+            unit: product.unit,
+            price: Number(product.sellingPrice) || 0,
+            stock: Number(product.stock) || 0,
+            minimumStock: Number(product.minimumStock) || 0,
+            stockTracked: Boolean(product.stockTracked),
+            stockIn: stockMovements.get(product.id)?.stockIn || 0,
+            stockOut: stockMovements.get(product.id)?.stockOut || 0,
+          })));
+        }
+      } catch (error) {
+        if (!cancelled) setNotice(error.message);
+      }
+    };
+    loadOperationsCatalog();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeUser.id, isAuthenticated, needsBusinessSetup]);
 
   useEffect(() => {
     const canManageBranches = activeUser.permissions.includes('branchManage');
@@ -3068,6 +3173,32 @@ function App() {
       setThemeSaving(false);
     }
   };
+
+  useEffect(() => {
+    if (!isAuthenticated
+      || demoMode
+      || !themeLoadedRef.current
+      || !canManageTheme) return undefined;
+    const timer = window.setTimeout(async () => {
+      try {
+        const response = await fetch('/api/workspace/theme', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(themeSettings),
+        });
+        if (!response.ok) throw new Error(await getApiError(response, 'Tema saat ini tidak dapat disimpan.'));
+        const result = await response.json();
+        setThemeSettings((current) => (
+          JSON.stringify(current) === JSON.stringify(result.themeSettings)
+            ? current
+            : normalizeThemeSettings(result.themeSettings, businessType)
+        ));
+      } catch (error) {
+        setThemeError(error.message);
+      }
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [themeSettings, isAuthenticated, demoMode, canManageTheme, businessType]);
 
   const logoutAccount = async () => {
     setLogoutError('');
@@ -3494,10 +3625,11 @@ function App() {
             {themeNotice && <div className="notice" role="status">{themeNotice}</div>}
             {themeError && <div className="notice error-notice" role="alert">{themeError}</div>}
             {demoMode && <div className="notice">Pratinjau demo — pengaturan disimpan lokal dan tidak mengubah data perusahaan.</div>}
+            {!canManageTheme && <div className="notice error-notice" role="alert">Hanya Owner dan Super Admin dengan izin tampilan dashboard yang dapat mengubah tema.</div>}
             <section className="theme-settings-card">
-              <div className="table-heading"><div><h2>Pilih tema dashboard</h2><p>Merah Putih menjadi tema default.</p></div></div>
+              <div className="table-heading"><div><h2>Pilih tema dashboard</h2><p>Crimson Momentum menjadi tema default. Pilihan berubah secara otomatis dan tersimpan untuk usaha ini.</p></div></div>
               <div className="theme-choice-grid">
-                {dashboardThemes.map((theme, index) => <button aria-pressed={themeSettings.themeId === theme.id} className={`theme-choice ${themeSettings.themeId === theme.id ? 'selected' : ''}`} key={theme.id} onClick={() => setThemeSettings((current) => ({ ...current, themeId: theme.id, mode: theme.mode }))} type="button">
+                {dashboardThemes.map((theme, index) => <button aria-pressed={themeSettings.themeId === theme.id} className={`theme-choice ${themeSettings.themeId === theme.id ? 'selected' : ''}`} disabled={!canManageTheme} key={theme.id} onClick={() => setThemeSettings((current) => ({ ...current, themeId: theme.id, mode: theme.mode }))} type="button">
                   <span className="theme-choice-preview" style={{ '--swatch-primary': theme.primary, '--swatch-support': theme.secondary }}><i /><i /><i /><b /></span>
                   <span className="theme-choice-label"><small>{`${index + 1}`.padStart(2, '0')}</small><strong>{theme.name}</strong></span>
                 </button>)}
@@ -3507,27 +3639,27 @@ function App() {
               <section className="theme-settings-card">
                 <div className="table-heading"><div><h2>Warna dashboard</h2><p>Atur warna utama dan pendukung.</p></div></div>
                 <div className="theme-color-fields">
-                  <label className="theme-color-field"><span>Warna utama</span><input aria-label="Warna utama" onChange={(event) => setThemeSettings((current) => ({ ...current, customPrimary: event.target.value }))} type="color" value={themeSettings.customPrimary || activeThemeColors.primary} /></label>
-                  <label className="theme-color-field"><span>Warna pendukung</span><input aria-label="Warna pendukung" onChange={(event) => setThemeSettings((current) => ({ ...current, customSecondary: event.target.value }))} type="color" value={themeSettings.customSecondary || activeThemeColors.secondary} /></label>
-                  <label className="field"><span>Mode tampilan</span><select onChange={(event) => setThemeSettings((current) => ({ ...current, mode: event.target.value }))} value={themeSettings.mode}><option value="light">Terang</option><option value="dark">Gelap</option></select></label>
+                  <label className="theme-color-field"><span>Warna utama</span><input aria-label="Warna utama" disabled={!canManageTheme} onChange={(event) => setThemeSettings((current) => ({ ...current, customPrimary: event.target.value }))} type="color" value={themeSettings.customPrimary || activeThemeColors.primary} /></label>
+                  <label className="theme-color-field"><span>Warna pendukung</span><input aria-label="Warna pendukung" disabled={!canManageTheme} onChange={(event) => setThemeSettings((current) => ({ ...current, customSecondary: event.target.value }))} type="color" value={themeSettings.customSecondary || activeThemeColors.secondary} /></label>
+                  <label className="field"><span>Mode tampilan</span><select disabled={!canManageTheme} onChange={(event) => setThemeSettings((current) => ({ ...current, mode: event.target.value }))} value={themeSettings.mode}><option value="light">Terang</option><option value="dark">Gelap</option></select></label>
                 </div>
               </section>
               <section className="theme-settings-card">
                 <div className="table-heading"><div><h2>Komponen dashboard</h2><p>Atur navigasi dan kartu ringkasan.</p></div></div>
                 <div className="theme-control-fields">
-                  <label className="field"><span>Tampilan sidebar</span><select onChange={(event) => setThemeSettings((current) => ({ ...current, sidebarMode: event.target.value }))} value={themeSettings.sidebarMode}><option value="wide">Lebar</option><option value="mini">Mini</option></select></label>
-                  <label className="field"><span>Gaya kartu statistik</span><select onChange={(event) => setThemeSettings((current) => ({ ...current, statCardStyle: event.target.value }))} value={themeSettings.statCardStyle}><option value="shadow">Bayangan lembut</option><option value="border">Garis tegas</option><option value="soft">Latar warna</option></select></label>
+                  <label className="field"><span>Tampilan sidebar</span><select disabled={!canManageTheme} onChange={(event) => setThemeSettings((current) => ({ ...current, sidebarMode: event.target.value }))} value={themeSettings.sidebarMode}><option value="wide">Lebar</option><option value="mini">Mini</option></select></label>
+                  <label className="field"><span>Gaya kartu statistik</span><select disabled={!canManageTheme} onChange={(event) => setThemeSettings((current) => ({ ...current, statCardStyle: event.target.value }))} value={themeSettings.statCardStyle}><option value="shadow">Bayangan lembut</option><option value="border">Garis tegas</option><option value="soft">Latar warna</option></select></label>
                 </div>
               </section>
             </div>
             <section className="theme-settings-card theme-assets-card">
               <div className="table-heading"><div><h2>Logo dan favicon</h2><p>Gunakan PNG, JPG, WebP, atau ICO maksimal 2 MB.</p></div></div>
               <div className="theme-assets-grid">
-                <label className="theme-upload"><span className="theme-asset-preview">{themeSettings.logoUrl ? <img alt="Pratinjau logo usaha" src={themeSettings.logoUrl} /> : 'KU'}</span><span><strong>Logo perusahaan</strong><small>Ditampilkan di navigasi dashboard.</small></span><input accept="image/png,image/jpeg,image/webp,image/x-icon" aria-label="Unggah logo perusahaan" onChange={(event) => changeThemeAsset(event, 'logo')} type="file" /></label>
-                <label className="theme-upload"><span className="theme-asset-preview favicon-preview">{themeSettings.faviconUrl ? <img alt="Pratinjau favicon" src={themeSettings.faviconUrl} /> : 'F'}</span><span><strong>Favicon</strong><small>Ikon tab browser workspace.</small></span><input accept="image/png,image/jpeg,image/webp,image/x-icon" aria-label="Unggah favicon" onChange={(event) => changeThemeAsset(event, 'favicon')} type="file" /></label>
+                <label className="theme-upload"><span className="theme-asset-preview">{themeSettings.logoUrl ? <img alt="Pratinjau logo usaha" src={themeSettings.logoUrl} /> : 'KU'}</span><span><strong>Logo perusahaan</strong><small>Ditampilkan di navigasi dashboard.</small></span><input accept="image/png,image/jpeg,image/webp,image/x-icon" aria-label="Unggah logo perusahaan" disabled={!canManageTheme} onChange={(event) => changeThemeAsset(event, 'logo')} type="file" /></label>
+                <label className="theme-upload"><span className="theme-asset-preview favicon-preview">{themeSettings.faviconUrl ? <img alt="Pratinjau favicon" src={themeSettings.faviconUrl} /> : 'F'}</span><span><strong>Favicon</strong><small>Ikon tab browser workspace.</small></span><input accept="image/png,image/jpeg,image/webp,image/x-icon" aria-label="Unggah favicon" disabled={!canManageTheme} onChange={(event) => changeThemeAsset(event, 'favicon')} type="file" /></label>
               </div>
             </section>
-            <div className="theme-save-row"><span>Pengaturan tersimpan terpisah untuk setiap perusahaan.</span><button className="button button-primary" disabled={themeSaving} onClick={saveTheme} type="button">{themeSaving ? 'Menyimpan…' : 'Simpan tampilan'} <span>→</span></button></div>
+            <div className="theme-save-row"><span>Pengaturan tersimpan terpisah untuk setiap perusahaan.</span><button className="button button-primary" disabled={themeSaving || !canManageTheme} onClick={saveTheme} type="button">{themeSaving ? 'Menyimpan…' : 'Simpan tampilan'} <span>→</span></button></div>
           </section>
         ) : activePage === 'Pengaturan Nota' ? (
           <section className="content theme-settings-page receipt-settings-page">
@@ -3747,16 +3879,26 @@ function App() {
               <label className="field"><span>Nama produk / jasa</span><input onChange={(event) => setPriceDraft((current) => ({ ...current, name: event.target.value }))} placeholder="Contoh: Cuci komplit reguler" required value={priceDraft.name} /></label>
               <label className="field"><span>Satuan</span><input onChange={(event) => setPriceDraft((current) => ({ ...current, unit: event.target.value }))} placeholder="kg, pcs, layanan" required value={priceDraft.unit} /></label>
               <label className="field"><span>Harga</span><div className="input-prefix"><span>Rp</span><input aria-label="Harga" min="1" onChange={(event) => setPriceDraft((current) => ({ ...current, price: event.target.value }))} placeholder="0" required type="number" value={priceDraft.price} /></div></label>
+              <label className="field"><span>Stok awal</span><input aria-label="Stok awal" min="0" onChange={(event) => setPriceDraft((current) => ({ ...current, stock: event.target.value }))} placeholder="0" type="number" value={priceDraft.stock} /></label>
+              <label className="field"><span>Stok minimum</span><input aria-label="Stok minimum" min="0" onChange={(event) => setPriceDraft((current) => ({ ...current, minimumStock: event.target.value }))} placeholder="0" type="number" value={priceDraft.minimumStock} /></label>
+              <label className="field"><span>Lacak stok</span><select aria-label="Lacak stok" onChange={(event) => setPriceDraft((current) => ({ ...current, stockTracked: event.target.value === 'true' }))} value={String(priceDraft.stockTracked)}><option value="false">Tidak</option><option value="true">Ya</option></select></label>
               <button className="button button-primary" type="submit">Tambah harga <span>＋</span></button>
             </form>
             <section className="table-card full-table">
               <div className="table-heading"><div><h2>Produk &amp; jasa aktif</h2><p>{priceItems.length} item dalam katalog</p></div></div>
-              <div className="table-scroll"><table><thead><tr><th>NAMA</th><th>SATUAN</th><th>HARGA JUAL</th></tr></thead><tbody>
-                {priceItems.map((item) => <tr key={item.id}><td><strong>{item.name}</strong></td><td>{item.unit}</td><td className="amount">{rupiah(item.price)}</td></tr>)}
-                {!priceItems.length && <tr><td colSpan="3">Belum ada produk atau jasa.</td></tr>}
+              <div className="table-scroll"><table><thead><tr><th>NAMA</th><th>SATUAN</th><th>HARGA JUAL</th><th>STOK MASUK</th><th>STOK KELUAR</th><th>STOK AKHIR</th></tr></thead><tbody>
+                {priceItems.map((item) => <tr key={item.id}>
+                  <td><strong>{item.name}</strong></td>
+                  <td>{item.unit}</td>
+                  <td className="amount">{rupiah(item.price)}</td>
+                  <td>{item.stockTracked ? Number(item.stockIn || 0).toLocaleString('id-ID') : '—'}</td>
+                  <td>{item.stockTracked ? Number(item.stockOut || 0).toLocaleString('id-ID') : '—'}</td>
+                  <td><strong>{item.stockTracked ? Number(item.stock || 0).toLocaleString('id-ID') : 'Tidak dilacak'}</strong></td>
+                </tr>)}
+                {!priceItems.length && <tr><td colSpan="6">Belum ada produk atau jasa.</td></tr>}
               </tbody></table></div>
             </section>
-            <p className="pos-demo-note">Katalog demo ini disimpan sementara di browser dan belum tersinkron ke database.</p>
+            <p className="pos-demo-note">{isAuthenticated ? 'Produk dan stok dilacak serta tersimpan di database workspace.' : 'Katalog demo ini disimpan sementara di browser dan belum tersinkron ke database.'}</p>
           </section>
         ) : activePage === 'Transaksi' ? (
           <section className="content">
@@ -3844,18 +3986,18 @@ function App() {
             movements={dealerMotorMovements}
             notice={notice}
             onCreate={async (unit) => {
-              if (!isAuthenticated) throw new Error('Masuk ke workspace untuk menyimpan stok motor.');
+              if (!isAuthenticated) throw new Error('Masuk ke workspace untuk menyimpan stok kendaraan.');
               const response = await fetch('/api/dealer-motor/units', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(unit),
               });
               const result = await response.json();
-              if (!response.ok) throw new Error(result.message || 'Unit motor tidak dapat disimpan.');
-              if (!result.unit?.id || !result.movement?.id) throw new Error('Data unit motor dari server tidak valid.');
+              if (!response.ok) throw new Error(result.message || 'Unit kendaraan tidak dapat disimpan.');
+              if (!result.unit?.id || !result.movement?.id) throw new Error('Data unit kendaraan dari server tidak valid.');
               setDealerMotorUnits((current) => [result.unit, ...current]);
               setDealerMotorMovements((current) => [result.movement, ...current]);
-              setNotice('Unit motor berhasil disimpan ke stok cabang.');
+              setNotice('Unit kendaraan berhasil disimpan ke stok cabang.');
             }}
             units={dealerMotorUnits}
           />

@@ -2,12 +2,12 @@ import { describe, expect, test } from 'vitest';
 import { dashboardThemes, defaultThemeSettings, getThemeColors, normalizeThemeSettings, resolveDashboardTheme } from './themes.js';
 
 describe('dashboard themes', () => {
-  test('provides ten themes with the red-white default and dark theme', () => {
+  test('provides ten modern themes with the red-white default and dark theme', () => {
     expect(dashboardThemes).toHaveLength(10);
     expect(defaultThemeSettings.themeId).toBe('red-white');
     expect(dashboardThemes[0]).toMatchObject({
-      name: 'Merah Putih',
-      primary: '#d93645',
+      name: 'Crimson Momentum',
+      primary: '#ef4444',
       secondary: '#fff1f2',
     });
     expect(dashboardThemes.find(({ id }) => id === 'white-clean')).toBeDefined();
@@ -27,7 +27,7 @@ describe('dashboard themes', () => {
       customPrimary: '#123456',
       customSecondary: '',
       mode: 'dark',
-    })).toEqual({ primary: '#123456', secondary: '#e9f5ed', mode: 'dark' });
+    })).toEqual({ primary: '#123456', secondary: '#ecfdf5', mode: 'dark' });
   });
 
   test('uses the legacy adapter for saved themes outside the new registry', () => {

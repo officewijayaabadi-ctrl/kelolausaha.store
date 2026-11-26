@@ -33,6 +33,24 @@ export const businessTypes = {
       ['employees', 'Manajemen karyawan'],
     ],
   },
+  dealer_vehicle: {
+    label: 'Dealer Kendaraan',
+    modules: [
+      ['dashboard', 'Dashboard Dealer'],
+      ...sharedPosModules,
+      ['customers', 'Manajemen konsumen'],
+      ['vehicles', 'Gudang & stok kendaraan'],
+      ['scratch_verification', 'Gesek rangka & mesin'],
+      ['pdi', 'Persiapan kendaraan (PDI)'],
+      ['sales_orders', 'Penjualan & SPK'],
+      ['handover', 'Serah terima konsumen'],
+      ['sales_team', 'Data sales'],
+      ['financing', 'Pembayaran & leasing'],
+      ['sales_reports', 'Laporan dealer'],
+      ['targets', 'Target penjualan'],
+      ['employees', 'Pengguna & RBAC'],
+    ],
+  },
   retail: {
     label: 'Toko / Retail',
     modules: [

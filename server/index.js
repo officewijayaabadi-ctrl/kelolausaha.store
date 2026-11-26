@@ -53,7 +53,7 @@ const otpRateLimits = new Map();
 const sentSupportMailboxCursors = new Map();
 let gmailSyncInProgress = false;
 let supportIo = null;
-const themeIds = new Set(['blue-professional', 'green-fresh', 'purple-elegant', 'orange-cheerful', 'pink-sweet', 'teal-modern', 'navy-elegant', 'yellow-warm', 'gray-minimal', 'white-clean']);
+const themeIds = new Set(['red-white', 'blue-professional', 'green-fresh', 'purple-elegant', 'orange-cheerful', 'pink-sweet', 'teal-modern', 'navy-elegant', 'yellow-warm', 'gray-minimal', 'white-clean']);
 const imageExtensions = new Set(['png', 'jpg', 'webp', 'ico']);
 const permissionSets = {
   'SUPER ADMIN': ['dashboard', 'spkCreate', 'spkViewAll', 'spkViewOwn', 'spkVerify', 'spkApprove', 'customerManage', 'salesManage', 'unitManage', 'leasingManage', 'posAccess', 'priceManage', 'transactionsView', 'receiptsView', 'userManage', 'accessManage', 'themeManage', 'attendanceView', 'branchManage'],

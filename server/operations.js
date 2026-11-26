@@ -332,7 +332,7 @@ export function createOperationsRouter({ pool, authenticate, requireTenant, requ
       const companyId = req.user.company_id;
       const branchId = operationalBranchScope(req);
       const terminalStatuses = ['completed', 'cancelled', 'returned', 'picked_up', 'delivered'];
-      const [summary, statuses, weeklySales, recentOrders, ledgerTotals, branchReport] = await Promise.all([
+      const [summary, statuses, weeklySales, recentOrders, ledgerTotals, branchReport, dealerMetrics] = await Promise.all([
         pool.query(
           `WITH paid AS (
              SELECT order_id, company_id, SUM(amount) AS amount
@@ -431,6 +431,40 @@ export function createOperationsRouter({ pool, authenticate, requireTenant, requ
             [companyId],
           )
           : Promise.resolve({ rows: [] }),
+        ['dealer_motor', 'dealer_vehicle'].includes(req.user.business_type)
+          ? pool.query(
+            `WITH unit_metrics AS (
+               SELECT
+                 COUNT(*)::int AS "totalUnits",
+                 COUNT(*) FILTER (WHERE stock_status = 'available')::int AS "availableUnits",
+                 COUNT(*) FILTER (WHERE stock_status = 'reserved')::int AS "reservedUnits",
+                 COUNT(*) FILTER (WHERE stock_status = 'approved_for_delivery')::int AS "readyDeliveryUnits",
+                 COUNT(*) FILTER (WHERE stock_status = 'in_delivery')::int AS "inDeliveryUnits",
+                 COUNT(*) FILTER (WHERE stock_status = 'delivered')::int AS "deliveredUnits",
+                 COUNT(*) FILTER (WHERE stock_status IN ('waiting_receipt', 'in_inspection'))::int AS "incomingUnits"
+               FROM dealer_motor_units
+               WHERE company_id = $1 AND ($2::uuid IS NULL OR branch_id = $2)
+             ), spk_metrics AS (
+               SELECT
+                 COUNT(*) FILTER (WHERE status NOT IN ('SELESAI', 'DITOLAK'))::int AS "activeSpks",
+                 COUNT(*) FILTER (WHERE status = 'APPROVAL SVP')::int AS "spksAwaitingApproval",
+                 COUNT(*) FILTER (WHERE status = 'DISETUJUI')::int AS "approvedSpks",
+                 COUNT(*) FILTER (WHERE created_at >= date_trunc('month', now())
+                   AND status NOT IN ('DITOLAK'))::int AS "spksMonth",
+                 COUNT(*) FILTER (WHERE created_at >= date_trunc('month', now())
+                   AND status NOT IN ('DITOLAK')
+                   AND upper(COALESCE(details ->> 'paymentType', '')) IN ('CASH', 'TUNAI'))::int AS "cashSpks",
+                 COUNT(*) FILTER (WHERE created_at >= date_trunc('month', now())
+                   AND status NOT IN ('DITOLAK')
+                   AND upper(COALESCE(details ->> 'paymentType', '')) IN ('CREDIT', 'KREDIT'))::int AS "creditSpks"
+               FROM dealer_motor_spks
+               WHERE company_id = $1 AND ($2::uuid IS NULL OR branch_id = $2)
+             )
+             SELECT unit_metrics.*, spk_metrics.*
+             FROM unit_metrics, spk_metrics`,
+            [companyId, branchId],
+          )
+          : Promise.resolve({ rows: [{}] }),
       ]);
       const {
         salesToday, salesMonth, receivables, ...safeSummary
@@ -439,6 +473,9 @@ export function createOperationsRouter({ pool, authenticate, requireTenant, requ
       res.json({
         businessType: req.user.business_type,
         summary: safeSummary,
+        dealerMetrics: ['dealer_motor', 'dealer_vehicle'].includes(req.user.business_type)
+          ? dealerMetrics.rows[0]
+          : null,
         ...(ownerView ? {
           financials: {
             salesToday,
@@ -468,7 +505,7 @@ export function createOperationsRouter({ pool, authenticate, requireTenant, requ
     try {
       const companyId = req.user.company_id;
       const branchId = operationalBranchScope(req);
-      const [products, customers, suppliers, orders, purchases] = await Promise.all([
+      const [products, customers, suppliers, orders, purchases, inventoryMovements] = await Promise.all([
         pool.query(
           `SELECT id, name, sku, category, unit, item_type AS "itemType",
                   cost_price AS "costPrice", selling_price AS "sellingPrice",
@@ -521,6 +558,18 @@ export function createOperationsRouter({ pool, authenticate, requireTenant, requ
            ORDER BY p.purchased_at DESC LIMIT 100`,
           [companyId, branchId],
         ),
+        pool.query(
+          `SELECT im.id, im.product_id AS "productId", p.name AS "productName",
+                  im.movement_type AS "movementType", im.quantity,
+                  im.reference, im.note, im.created_at AS "createdAt",
+                  u.name AS "createdByName"
+           FROM inventory_movements im
+           JOIN business_products p ON p.id = im.product_id AND p.company_id = im.company_id
+           JOIN users u ON u.id = im.created_by
+           WHERE im.company_id = $1
+           ORDER BY im.created_at DESC LIMIT 1000`,
+          [companyId],
+        ),
       ]);
       res.json({
         businessType: req.user.business_type,
@@ -529,6 +578,7 @@ export function createOperationsRouter({ pool, authenticate, requireTenant, requ
         suppliers: suppliers.rows,
         orders: orders.rows,
         purchases: purchases.rows,
+        inventoryMovements: inventoryMovements.rows,
       });
     } catch (error) {
       next(error);
