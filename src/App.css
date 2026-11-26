@@ -39,7 +39,10 @@ button { cursor: pointer; }
 .brand-copy strong { color: #303943; font-size: 12px; letter-spacing: .55px; }
 .brand-copy span { color: #89919b; font-size: 11px; }
 .workspace-label, .nav-label { padding: 0 9px; color: #9098a2; font-size: 9px; font-weight: 700; letter-spacing: 1.15px; }
-.dealer-switch { display: flex; align-items: center; gap: 10px; height: 56px; margin: 10px 0 30px; padding: 8px; border: 1px solid #f0e5e6; border-radius: 9px; background: #fffafa; }
+.dealer-switch { display: flex; width: 100%; align-items: center; gap: 10px; height: 56px; margin: 10px 0 30px; padding: 8px; border: 1px solid #f0e5e6; border-radius: 9px; background: #fffafa; }
+button.dealer-switch { color: inherit; font: inherit; text-align: left; cursor: pointer; transition: border-color .15s, box-shadow .15s; }
+button.dealer-switch:hover { border-color: #e7c7cb; box-shadow: 0 3px 12px #a8233212; }
+button.dealer-switch:focus-visible { outline: 2px solid var(--theme-primary, #bd2635); outline-offset: 2px; }
 .dealer-icon { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 7px; color: #c52f3e; background: #ffe9eb; font-size: 14px; font-weight: 800; }
 .dealer-copy, .profile-copy { display: flex; flex: 1; flex-direction: column; gap: 4px; min-width: 0; }
 .dealer-copy strong { color: #343c46; font-size: 12px; font-weight: 600; }

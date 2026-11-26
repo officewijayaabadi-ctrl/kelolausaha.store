@@ -268,7 +268,7 @@ function getUserMenus(user) {
     const permission = menuPermission(label);
     return permission && (
       permissions.includes(permission)
-      || (['Tampilan Dashboard', 'Pengaturan Nota'].includes(label)
+      || (['Tampilan Dashboard', 'Pengaturan Nota', 'Struktur Workspace'].includes(label)
         && ['OWNER', 'SUPER ADMIN'].includes(user?.role))
     );
   });
@@ -278,6 +278,17 @@ function getUserMenus(user) {
     permissions.includes(permission) && !representedPermissions.has(permission)
   ));
   return [...baseMenus, ...additionalMenus];
+}
+
+function getWorkspaceModulesForBusiness(businessType, configuredModules) {
+  const defaultModules = businessTypes[businessType].modules.map(([id]) => id);
+  const modules = Array.isArray(configuredModules) && configuredModules.length
+    ? configuredModules
+    : defaultModules;
+  const requiredModules = ['dealer_motor', 'dealer_vehicle'].includes(businessType)
+    ? ['vehicles']
+    : [];
+  return [...new Set([...modules, ...requiredModules])];
 }
 
 const businessMenuLabels = {
@@ -2199,11 +2210,11 @@ function App() {
       || registrationPayload?.businessType
       || 'dealer_motor';
     const knownBusinessType = businessTypes[nextBusinessType] ? nextBusinessType : 'dealer_motor';
-    const modules = result.business?.modules || registrationPayload?.modules;
     setBusinessType(knownBusinessType);
-    const activeModules = Array.isArray(modules) && modules.length
-      ? modules
-      : businessTypes[knownBusinessType].modules.map(([id]) => id);
+    const activeModules = getWorkspaceModulesForBusiness(
+      knownBusinessType,
+      result.business?.modules || registrationPayload?.modules,
+    );
     setWorkspaceModules(activeModules);
     setWorkspaceModuleDraft(activeModules);
     setPriceItems(priceCatalogs[knownBusinessType]);
@@ -2223,6 +2234,11 @@ function App() {
   const saveWorkspaceStructure = async () => {
     if (!workspaceModuleDraft.includes('dashboard')) {
       setNotice('Dashboard wajib tetap aktif pada workspace.');
+      return;
+    }
+    if (['dealer_motor', 'dealer_vehicle'].includes(businessType)
+      && !workspaceModuleDraft.includes('vehicles')) {
+      setNotice('Modul stok kendaraan wajib aktif agar unit dealer dapat ditampilkan.');
       return;
     }
     setWorkspaceModulesSaving(true);
@@ -3331,11 +3347,23 @@ function App() {
         </div>
 
         <div className="workspace-label">WORKSPACE</div>
-        <div className="dealer-switch">
-          <span className="dealer-icon">{workspaceName.charAt(0).toUpperCase()}</span>
-          <span className="dealer-copy"><strong>{workspaceName}</strong><small>Workspace aktif</small></span>
-          <span className="switch-chevron">⌄</span>
-        </div>
+        {['OWNER', 'SUPER ADMIN'].includes(activeUser.role)
+          ? <button
+            aria-label="Buka pengaturan workspace"
+            className="dealer-switch"
+            onClick={() => openPage('Struktur Workspace')}
+            title="Buka pengaturan workspace"
+            type="button"
+          >
+            <span className="dealer-icon">{workspaceName.charAt(0).toUpperCase()}</span>
+            <span className="dealer-copy"><strong>{workspaceName}</strong><small>Workspace aktif</small></span>
+            <span className="switch-chevron">⌄</span>
+          </button>
+          : <div className="dealer-switch">
+            <span className="dealer-icon">{workspaceName.charAt(0).toUpperCase()}</span>
+            <span className="dealer-copy"><strong>{workspaceName}</strong><small>Workspace aktif</small></span>
+            <span className="switch-chevron">⌄</span>
+          </div>}
 
         <div className="nav-label">MENU USAHA</div>
         <nav className="main-nav" aria-label="Menu utama">
@@ -4264,16 +4292,22 @@ function App() {
               <div className="workspace-module-grid">
                 {(businessTypes[businessType]?.modules || []).map(([id, label]) => {
                   const checked = workspaceModuleDraft.includes(id);
+                  const required = id === 'dashboard'
+                    || (id === 'vehicles' && ['dealer_motor', 'dealer_vehicle'].includes(businessType));
                   return <label className={`workspace-module-option ${checked ? 'is-selected' : ''}`} key={id}>
                     <input
                       checked={checked}
-                      disabled={id === 'dashboard'}
+                      disabled={required}
                       onChange={() => setWorkspaceModuleDraft((current) => (
                         current.includes(id) ? current.filter((moduleId) => moduleId !== id) : [...current, id]
                       ))}
                       type="checkbox"
                     />
-                    <span><strong>{label}</strong><small>{id === 'dashboard' ? 'Wajib aktif untuk ringkasan workspace.' : 'Tampilkan atau sembunyikan modul ini di navigasi tim.'}</small></span>
+                    <span><strong>{label}</strong><small>{id === 'dashboard'
+                      ? 'Wajib aktif untuk ringkasan workspace.'
+                      : required
+                        ? 'Wajib aktif agar stok unit dan penerimaan kendaraan tampil.'
+                        : 'Tampilkan atau sembunyikan modul ini di navigasi tim.'}</small></span>
                   </label>;
                 })}
               </div>
@@ -4441,5 +4475,5 @@ function App() {
   );
 }
 
-export { createPosReceiptSvg, getUserMenus };
+export { createPosReceiptSvg, getUserMenus, getWorkspaceModulesForBusiness };
 export default App;

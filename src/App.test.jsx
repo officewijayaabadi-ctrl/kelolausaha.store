@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import App, { createPosReceiptSvg, getUserMenus } from './App';
+import App, { createPosReceiptSvg, getUserMenus, getWorkspaceModulesForBusiness } from './App';
 
 const { mockIo, mockSocket, mockSocketHandlers } = vi.hoisted(() => {
   const handlers = new Map();
@@ -71,6 +71,19 @@ test('lets the owner open business profile management', async () => {
   expect(screen.getByRole('textbox', { name: /Nama usaha/ }).value).toBe('Dealer Motor Wijaya Abadi Mulia');
   expect(screen.getByRole('textbox', { name: /Alamat usaha/ })).toBeDefined();
   expect(screen.getByLabelText('Logo usaha')).toBeDefined();
+});
+
+test('opens workspace settings from the active workspace and keeps dealer inventory enabled', () => {
+  render(<App />);
+  openOwnerPreview();
+  fireEvent.change(screen.getByRole('combobox', { name: 'Pilih akun demo' }), {
+    target: { value: 'user-2' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Buka pengaturan workspace' }));
+
+  expect(screen.getByRole('heading', { name: 'Struktur Workspace' })).toBeDefined();
+  expect(getWorkspaceModulesForBusiness('dealer_motor', ['dashboard'])).toContain('vehicles');
+  expect(getWorkspaceModulesForBusiness('retail', ['dashboard'])).not.toContain('vehicles');
 });
 
 test('shows the business QRIS in the cashier when QRIS is selected', async () => {
