@@ -23,20 +23,30 @@ describe('business access permissions', () => {
 
   test.each(Object.keys(businessTypes))('keeps cashier permissions aligned for %s', (businessType) => {
     const enabledModules = businessTypes[businessType].modules.map(([id]) => id);
-    expect(filterPermissionsForBusiness([
+    const filtered = filterPermissionsForBusiness([
       'dashboard',
       'posAccess',
       'priceManage',
       'transactionsView',
       'receiptsView',
       'attendanceView',
-    ], businessType, enabledModules)).toEqual([
-      'dashboard',
-      'posAccess',
-      'priceManage',
-      'transactionsView',
-      'receiptsView',
-      'attendanceView',
-    ]);
+    ], businessType, enabledModules);
+    expect(filtered).toContain('dashboard');
+    expect(filtered).toContain('attendanceView');
+    if (enabledModules.includes('pos')) {
+      expect(filtered).toEqual([
+        'dashboard',
+        'posAccess',
+        'priceManage',
+        'transactionsView',
+        'receiptsView',
+        'attendanceView',
+      ]);
+    } else {
+      expect(filtered).not.toContain('posAccess');
+      expect(filtered).not.toContain('priceManage');
+      expect(filtered).not.toContain('transactionsView');
+      expect(filtered).not.toContain('receiptsView');
+    }
   });
 });

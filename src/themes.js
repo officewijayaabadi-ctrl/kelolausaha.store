@@ -1,3 +1,5 @@
+import { resolveTheme as resolveDesignSystemTheme } from '../packages/design-system/core/ThemeResolver.js';
+
 export const dashboardThemes = [
   { id: 'red-white', name: 'Merah Putih', primary: '#d93645', secondary: '#fff1f2', mode: 'light' },
   { id: 'green-fresh', name: 'Hijau Segar', primary: '#21845a', secondary: '#e9f5ed', mode: 'light' },
@@ -85,4 +87,15 @@ export function getThemeColors(settings) {
     secondary: settings.customSecondary || theme.secondary,
     mode: settings.mode || theme.mode,
   };
+}
+
+export function resolveDashboardTheme(appKey, savedTheme, registry = {}) {
+  const legacyTheme = dashboardThemes.find(({ id }) => id === savedTheme)
+    || dashboardThemes[0];
+  return resolveDesignSystemTheme({
+    appKey,
+    savedTheme,
+    registry,
+    legacyTheme,
+  });
 }

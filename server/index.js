@@ -17,6 +17,12 @@ import {
   businessTypeIds,
   filterPermissionsForBusiness,
 } from '../shared/business-modules.js';
+import {
+  getIndustryRoles,
+  getRolePermissions,
+  flattenRolePermissions,
+  createIndustryAuditEvent,
+} from '../shared/industry-business-engine.js';
 import { createDealerMotorRouter } from './dealer-motor.js';
 import { midtransFailureMessage, resolveMidtransEnvironment, verifyNotificationSignature } from './midtrans.js';
 import { createOperationsRouter, createPublicOperationsRouter } from './operations.js';
@@ -213,7 +219,8 @@ async function authenticate(req, res, next) {
   if (!token) return res.status(401).json({ message: 'Silakan masuk kembali.' });
   try {
     const result = await pool.query(
-      `SELECT u.id, u.name, u.email, u.role, u.permissions, u.company_id, u.branch_id,
+      `SELECT u.id, u.name, u.email, u.role, u.permissions, u.industry_role,
+              u.industry_permissions, u.company_id, u.branch_id,
               c.name AS company_name, c.slug AS company_slug, c.business_type, c.modules, c.trial_started_at,
               c.trial_ends_at, c.active_until, c.plan_id, c.subscription_status,
               c.theme_settings
@@ -711,10 +718,23 @@ app.post('/api/auth/verify-otp', async (req, res, next) => {
         );
       const result = await client.query(
         `INSERT INTO users (
-           company_id, branch_id, name, email, phone, role, permissions, active, approval_status
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, false, 'pending')
-         RETURNING id, company_id, name, email, role, permissions`,
-        [invite.company_id, branchResult.rows[0]?.id, payload.name || email, email, payload.phone, invite.role, JSON.stringify(permissionSets[invite.role] || [])],
+           company_id, branch_id, name, email, phone, role, permissions,
+           industry_role, industry_permissions, active, approval_status
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, false, 'pending')
+         RETURNING id, company_id, name, email, role, permissions, industry_role, industry_permissions`,
+        [
+          invite.company_id,
+          branchResult.rows[0]?.id,
+          payload.name || email,
+          email,
+          payload.phone,
+          invite.role,
+          JSON.stringify(
+            permissionSets[invite.role] || [],
+          ),
+          invite.industry_role,
+          JSON.stringify(invite.industry_permissions || []),
+        ],
       );
       user = result.rows[0];
       await client.query('UPDATE team_invites SET consumed_at = now() WHERE token_hash = $1', [invite.token_hash]);
@@ -924,9 +944,21 @@ app.post('/api/auth/logout', authenticate, async (req, res, next) => {
 
 app.post('/api/team/invites', authenticate, requireRole('OWNER', 'SUPER ADMIN'), requireTenant, requireActiveTenant, async (req, res, next) => {
   const role = String(req.body.role || '');
-  const allowedRoles = req.user.role === 'OWNER'
+  const industryRole = String(req.body.industryRole || '').trim();
+  const industryRoles = getIndustryRoles(req.user.business_type);
+  const legacyRoles = req.user.role === 'OWNER'
     ? ['SUPER ADMIN', 'HRD', 'SVP', 'SPV', 'KEPALA TOKO', 'ADMIN', 'SALES', 'KASIR', 'DRIVER']
     : ['HRD', 'SVP', 'SPV', 'KEPALA TOKO', 'ADMIN', 'SALES', 'KASIR', 'DRIVER'];
+  const allowedRoles = [...new Set([...legacyRoles, ...industryRoles])];
+  const industryPermissions = industryRole
+    ? flattenRolePermissions(req.user.business_type, industryRole)
+    : [];
+  if (industryRole && !industryRoles.includes(industryRole)) {
+    return res.status(400).json({ message: 'Peran industri tidak valid untuk jenis usaha ini.' });
+  }
+  if (industryRole && !role) {
+    return res.status(400).json({ message: 'Peran operasional wajib dipilih.' });
+  }
   let branchId = req.body.branchId ? String(req.body.branchId) : null;
   if (!allowedRoles.includes(role) || (branchId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(branchId))) {
     return res.status(400).json({ message: 'Peran undangan tidak valid.' });
@@ -947,9 +979,19 @@ app.post('/api/team/invites', authenticate, requireRole('OWNER', 'SUPER ADMIN'),
     }
     const token = randomBytes(32).toString('base64url');
     await pool.query(
-      `INSERT INTO team_invites (token_hash, company_id, branch_id, role, expires_at)
-       VALUES ($1, $2, $3, $4, now() + interval '7 days')`,
-      [hash(token), req.user.company_id, branchId, role],
+      `INSERT INTO team_invites (
+         token_hash, company_id, branch_id, role, industry_role,
+         industry_permissions, expires_at
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, now() + interval '7 days')`,
+      [
+        hash(token),
+        req.user.company_id,
+        branchId,
+        role,
+        industryRole || null,
+        JSON.stringify(industryPermissions),
+      ],
     );
     const origin = workspaceUrlFor(req.user.company_slug, appRootOrigin(req));
     res.json({ inviteUrl: `${origin}/?invite=${token}`, workspaceUrl: origin });
@@ -961,7 +1003,10 @@ app.post('/api/team/invites', authenticate, requireRole('OWNER', 'SUPER ADMIN'),
 app.get('/api/team/members', authenticate, requireRole('OWNER', 'SUPER ADMIN'), requireTenant, requireActiveTenant, async (req, res, next) => {
   try {
     const result = await pool.query(
-      `SELECT id, name, email, role, permissions, active,
+      `SELECT id, name, email, role, permissions,
+              industry_role AS "industryRole",
+              industry_permissions AS "industryPermissions",
+              active,
               approval_status AS "approvalStatus", created_at AS "createdAt"
        FROM users WHERE company_id = $1
        ORDER BY CASE WHEN approval_status = 'pending' THEN 0 ELSE 1 END, created_at DESC`,

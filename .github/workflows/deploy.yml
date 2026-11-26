@@ -424,7 +424,7 @@ jobs:
             JS
 
             echo "Running database migrations..."
-            npm run db:migrate
+            MIGRATION_BASELINE_THROUGH=015 npm run db:migrate
 
             echo "Building frontend..."
             npm run build

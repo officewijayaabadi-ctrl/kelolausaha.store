@@ -41,7 +41,7 @@ afterEach(() => {
 
 test('shows a public product site with platform features and activation prices', () => {
   const { container } = render(<App />);
-  expect(screen.getByRole('heading', { name: /Kelola usaha lebih terarah/ })).toBeDefined();
+  expect(screen.getByRole('heading', { name: /Kelola bisnis lebih cerdas.*Tumbuh lebih cepat/i })).toBeDefined();
   expect(screen.getByText('POS & kasir')).toBeDefined();
   expect(screen.getByText('Nota digital WhatsApp')).toBeDefined();
   expect(screen.getByText('Dealer motor')).toBeDefined();

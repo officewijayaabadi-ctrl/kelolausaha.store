@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { dashboardThemes, defaultThemeSettings, getThemeColors, normalizeThemeSettings } from './themes.js';
+import { dashboardThemes, defaultThemeSettings, getThemeColors, normalizeThemeSettings, resolveDashboardTheme } from './themes.js';
 
 describe('dashboard themes', () => {
   test('provides ten themes with the red-white default and dark theme', () => {
@@ -28,6 +28,15 @@ describe('dashboard themes', () => {
       customSecondary: '',
       mode: 'dark',
     })).toEqual({ primary: '#123456', secondary: '#e9f5ed', mode: 'dark' });
+  });
+
+  test('uses the legacy adapter for saved themes outside the new registry', () => {
+    expect(resolveDashboardTheme('dealer-motor', 'green-fresh', {
+      'dealer-motor': [{ id: 'dealer-01' }],
+    }).id).toBe('green-fresh');
+    expect(resolveDashboardTheme('retail', 'dealer-01', {
+      retail: [{ id: 'retail-01' }],
+    }).id).toBe('red-white');
   });
 
   test('uses the business type accent for new receipt settings and preserves saved choices', () => {

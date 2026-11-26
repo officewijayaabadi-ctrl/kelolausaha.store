@@ -1,0 +1,13 @@
+:root {
+  --theme-primary: #d93645;
+  --theme-secondary: #fff1f2;
+  --theme-accent: #d93645;
+  --theme-background: #f7f9f8;
+  --theme-surface: #ffffff;
+  --theme-text: #17241f;
+  --theme-text-muted: #74817b;
+  --theme-border: #e8edea;
+  --theme-success: #16a34a;
+  --theme-warning: #d97706;
+  --theme-danger: #dc2626;
+}

@@ -140,8 +140,8 @@ function PublicSite({ onLogin, onRegister, onPreview, statusMessage }) {
         <div className="public-hero-orb public-hero-orb-two" />
         <div className="public-hero-copy">
           <span className="public-eyebrow"><i /> PLATFORM OPERASIONAL UNTUK USAHA</span>
-          <h1>Kelola usaha lebih <em>terarah.</em></h1>
-          <p>Satukan penjualan, kasir, tim, pelanggan, dan aktivitas usaha dalam satu workspace yang dapat disesuaikan dengan kebutuhan bisnis Anda.</p>
+          <h1>Kelola bisnis lebih <em>cerdas.</em><br />Tumbuh lebih cepat.</h1>
+          <p>Satu platform untuk mengelola operasional, pelanggan, tim, dan perkembangan bisnis Anda.</p>
           <div className="public-hero-actions">
             <button className="public-button" onClick={onRegister} type="button">Mulai demo gratis <span>→</span></button>
             <a className="public-secondary-link" href="#fitur">Jelajahi fitur <span>↓</span></a>

@@ -11,6 +11,10 @@ import {
   isPermissionAvailableForBusiness,
 } from '../shared/business-modules.js';
 import {
+  getIndustryRoles,
+  flattenRolePermissions,
+} from '../shared/industry-business-engine.js';
+import {
   dashboardThemes,
   defaultThemeSettings,
   getThemeColors,
@@ -1102,6 +1106,7 @@ function App() {
   const [accessDraft, setAccessDraft] = useState(null);
   const [accessSaving, setAccessSaving] = useState(false);
   const [inviteRole, setInviteRole] = useState('SUPER ADMIN');
+  const [industryRole, setIndustryRole] = useState('');
   const [inviteBranchId, setInviteBranchId] = useState('');
   const [inviteUrl, setInviteUrl] = useState('');
   const [inviting, setInviting] = useState(false);
@@ -2017,7 +2022,11 @@ function App() {
       const response = await fetch('/api/team/invites', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ role: inviteRole, branchId: inviteBranchId || undefined }),
+        body: JSON.stringify({
+          role: inviteRole,
+          industryRole: industryRole || undefined,
+          branchId: inviteBranchId || undefined,
+        }),
       });
       if (!response.ok) {
         setNotice(await getApiError(response, 'Link pendaftaran tidak dapat dibuat.'));
@@ -4022,6 +4031,7 @@ function App() {
               <div><span className="invite-card-icon">＋</span><div><h2>{activeUser.role === 'OWNER' ? 'Undang Super Admin atau karyawan' : 'Undang karyawan'}</h2><p>{activeUser.role === 'OWNER' ? 'Pendaftaran melalui link peran diverifikasi dengan OTP dan menunggu persetujuan.' : 'Super Admin hanya dapat membuat undangan tim operasional.'}</p></div></div>
               <form className="invite-form" onSubmit={createEmployeeInvite}>
                 <label className="field"><span>Peran undangan</span><select aria-label="Peran karyawan" onChange={(event) => setInviteRole(event.target.value)} value={inviteRole}>{(activeUser.role === 'OWNER' ? ['SUPER ADMIN', 'HRD', 'SVP', 'SPV', 'KEPALA TOKO', 'ADMIN', 'SALES', 'KASIR', 'DRIVER'] : ['HRD', 'SVP', 'SPV', 'KEPALA TOKO', 'ADMIN', 'SALES', 'KASIR', 'DRIVER']).map((item) => <option key={item}>{item}</option>)}</select></label>
+                {inviteRole !== 'SUPER ADMIN' && <label className="field"><span>Peran khusus industri</span><select aria-label="Peran khusus industri" onChange={(event) => setIndustryRole(event.target.value)} value={industryRole}><option value="">Gunakan peran umum</option>{getIndustryRoles(businessType).map((item) => <option key={item} value={item}>{item}</option>)}</select></label>}
                 <label className="field"><span>Cabang penempatan</span><select aria-label="Cabang karyawan" onChange={(event) => setInviteBranchId(event.target.value)} value={inviteBranchId}><option value="">Cabang utama otomatis</option>{workspaceBranches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>
                 <button className="button button-primary" disabled={inviting} type="submit">{inviting ? 'Membuat link…' : 'Buat link pendaftaran'} <span>→</span></button>
               </form>
