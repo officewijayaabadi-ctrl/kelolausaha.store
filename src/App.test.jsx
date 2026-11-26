@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import App, { createPosReceiptSvg } from './App';
+import App, { createPosReceiptSvg, getUserMenus } from './App';
 
 const { mockIo, mockSocket, mockSocketHandlers } = vi.hoisted(() => {
   const handlers = new Map();
@@ -188,8 +188,11 @@ test('opens the receipt studio for Owner and Super Admin and saves workspace pre
   fireEvent.click(screen.getByRole('button', { name: 'Pengaturan Nota' }));
   expect(screen.getByRole('heading', { name: 'Studio Nota' })).toBeDefined();
   fireEvent.click(screen.getByRole('button', { name: /Struk Thermal 58\/80mm/ }));
-  fireEvent.change(screen.getByRole('textbox', { name: 'Alamat / kontak pada nota' }), {
+  fireEvent.change(screen.getByRole('textbox', { name: 'Alamat usaha pada nota' }), {
     target: { value: 'Jl. Melati No. 18' },
+  });
+  fireEvent.change(screen.getByRole('textbox', { name: 'Kontak / WhatsApp pada nota' }), {
+    target: { value: '081234567890' },
   });
   fireEvent.click(screen.getByRole('button', { name: /simpan pengaturan nota/i }));
   await waitFor(() => expect(screen.getByRole('status').textContent).toContain('Pengaturan nota pratinjau tersimpan'));
@@ -197,6 +200,7 @@ test('opens the receipt studio for Owner and Super Admin and saves workspace pre
   expect(JSON.parse(localStorage.getItem('ku-demo-theme:dealer_motor')).receiptSettings).toMatchObject({
     mode: 'thermal',
     storeAddress: 'Jl. Melati No. 18',
+    storePhone: '081234567890',
   });
 
   fireEvent.change(accountSelector, { target: { value: 'user-1' } });
@@ -806,13 +810,26 @@ test('applies the workspace receipt settings to its shareable image', () => {
     mode: 'thermal',
     accent: 'royal',
     storeAddress: 'Jl. Melati No. 18',
+    storePhone: '081234567890',
     footerNote: 'Simpan nota ini.',
+    logoUrl: '/uploads/company/logo.png',
   });
 
   expect(svg).toContain('STRUK PEMBAYARAN');
   expect(svg).toContain('fill="#2563eb"');
   expect(svg).toContain('Jl. Melati No. 18');
+  expect(svg).toContain('081234567890');
+  expect(svg).toContain('<image href="');
+  expect(svg).toContain('/uploads/company/logo.png');
   expect(svg).toContain('Simpan nota ini.');
+});
+
+test('lets business Owners configure their own receipts without legacy theme permission', () => {
+  const ownerMenus = getUserMenus({ role: 'OWNER', permissions: ['dashboard'] });
+  const superAdminMenus = getUserMenus({ role: 'SUPER ADMIN', permissions: ['dashboard'] });
+
+  expect(ownerMenus.some(([label]) => label === 'Pengaturan Nota')).toBe(true);
+  expect(superAdminMenus.some(([label]) => label === 'Pengaturan Nota')).toBe(true);
 });
 
 test('creates and prints a motorcycle purchase receipt from submitted SPK data', async () => {

@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react';
-import { expect, test } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { expect, test, vi } from 'vitest';
 import { DealerMotorWorkspace } from './DealerMotorWorkspace.jsx';
 
 test('shows reserved units and incoming/outgoing movement records', () => {
@@ -62,4 +62,112 @@ test('shows reserved units and incoming/outgoing movement records', () => {
   expect(screen.getByText('Masuk · Motor masuk')).toBeDefined();
   expect(screen.getByText('Keluar · Terkirim/terjual')).toBeDefined();
   expect(screen.getByText('SPK-WAM-20261123-0001')).toBeDefined();
+});
+
+test('opens the stock intake form from the inventory menu', () => {
+  vi.stubGlobal('fetch', vi.fn(async () => ({
+    ok: true,
+    json: async () => ({ products: [] }),
+  })));
+  render(
+    <DealerMotorWorkspace
+      branches={[]}
+      canManage
+      movements={[]}
+      notice=""
+      onCreate={vi.fn()}
+      units={[]}
+    />,
+  );
+
+  expect(screen.queryByRole('heading', { name: 'Tambah unit motor' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: /Input stok tambahan/ }));
+  expect(screen.getByRole('heading', { name: 'Tambah unit motor' })).toBeDefined();
+  expect(document.querySelector('#dealer-stock-entry-form')).not.toBeNull();
+  vi.unstubAllGlobals();
+});
+
+test('allows a manually entered model and groups Rupiah digits in the stock form', () => {
+  vi.stubGlobal('fetch', vi.fn(async () => ({
+    ok: true,
+    json: async () => ({ products: [] }),
+  })));
+  render(
+    <DealerMotorWorkspace
+      branches={[{ id: 'branch-1', name: 'Cabang Utama' }]}
+      canManage
+      intakes={[]}
+      movements={[]}
+      notice=""
+      onCreate={vi.fn()}
+      onCompleteInspection={vi.fn()}
+      units={[]}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: /Input stok tambahan/ }));
+  fireEvent.change(document.querySelector('input[name="model"]'), { target: { value: 'Model manual' } });
+  fireEvent.change(document.querySelector('input[name="otrPrice"]'), { target: { value: '19000000' } });
+  fireEvent.change(document.querySelector('input[name="quantity"]'), { target: { value: '3' } });
+
+  expect(document.querySelector('input[name="model"]').value).toBe('Model manual');
+  expect(document.querySelector('input[name="otrPrice"]').value).toBe('19.000.000');
+  expect(document.querySelector('input[name="quantity"]').value).toBe('3');
+  vi.unstubAllGlobals();
+});
+
+test('fills vehicle details when a Honda model is selected from the catalog', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (url) => ({
+    ok: true,
+    json: async () => (url.endsWith('/catalog')
+      ? {
+        products: [{
+          id: 'beat',
+          slug: 'beat',
+          name: 'Honda Beat',
+          category: 'Matic',
+          modelYear: 2026,
+          price: 19000000,
+          colors: ['Hitam'],
+        }],
+      }
+      : { product: { specification: '109 cc' } }),
+  })));
+  render(
+    <DealerMotorWorkspace
+      branches={[{ id: 'branch-1', name: 'Cabang Utama' }]}
+      canManage
+      intakes={[]}
+      movements={[]}
+      notice=""
+      onCreate={vi.fn()}
+      onCompleteInspection={vi.fn()}
+      units={[]}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: /Input stok tambahan/ }));
+  await waitFor(() => expect(document.querySelector('datalist option[value="Honda Beat"]')).not.toBeNull());
+  fireEvent.change(document.querySelector('input[name="model"]'), { target: { value: 'Honda Beat' } });
+
+  await waitFor(() => expect(document.querySelector('input[name="specification"]').value).toBe('109 cc'));
+  expect(document.querySelector('input[name="brand"]').value).toBe('Honda');
+  expect(document.querySelector('input[name="modelYear"]').value).toBe('2026');
+  expect(document.querySelector('select[name="color"]').value).toBe('Hitam');
+  expect(document.querySelector('input[name="otrPrice"]').value).toBe('19.000.000');
+  vi.unstubAllGlobals();
+});
+
+test('hides stock intake action from users without inventory access', () => {
+  render(
+    <DealerMotorWorkspace
+      branches={[]}
+      canManage={false}
+      movements={[]}
+      notice=""
+      onCreate={vi.fn()}
+      units={[]}
+    />,
+  );
+
+  expect(screen.queryByRole('button', { name: /Input stok tambahan/ })).toBeNull();
+  expect(document.querySelector('#dealer-stock-entry-form')).toBeNull();
 });

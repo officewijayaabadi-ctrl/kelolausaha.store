@@ -34,8 +34,6 @@ export default function IndustryDashboard({
   trialCountdown,
   trialEndsAt,
   onActivate,
-  canManageInventory = false,
-  onManageInventory,
 }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -96,9 +94,6 @@ export default function IndustryDashboard({
           <h1>Dashboard</h1>
           <p>Pantau operasional <strong>{workspaceName}</strong> berdasarkan data workspace Anda.</p>
         </div>
-        {isDealer && canManageInventory && <button className="button button-primary" onClick={onManageInventory} type="button">
-          <span className="plus">+</span> Input stok tambahan
-        </button>}
       </div>
 
       {isOwner && trialCountdown && <section aria-label="Hitung mundur masa demo" className="owner-trial-countdown" role="status">

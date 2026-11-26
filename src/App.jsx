@@ -268,7 +268,8 @@ function getUserMenus(user) {
     const permission = menuPermission(label);
     return permission && (
       permissions.includes(permission)
-      || (label === 'Tampilan Dashboard' && ['OWNER', 'SUPER ADMIN'].includes(user?.role))
+      || (['Tampilan Dashboard', 'Pengaturan Nota'].includes(label)
+        && ['OWNER', 'SUPER ADMIN'].includes(user?.role))
     );
   });
   const representedPermissions = new Set((roleMenus[user?.role] ?? [])
@@ -589,12 +590,17 @@ function createPosReceiptSvg(transaction, businessName, receiptSettings = defaul
   const itemHeight = 94;
   const noteHeight = transaction.specialNotes ? 70 : 0;
   const height = itemTop + transaction.items.length * itemHeight + noteHeight + 260;
+  const logoPath = String(receiptSettings.logoUrl || '').trim();
+  const logoHref = logoPath.startsWith('/uploads/') && !logoPath.includes('..')
+    ? `${window.location.origin}${logoPath}`
+    : '';
   const accentColor = ({
     emerald: '#059669',
     crimson: '#dc2626',
     royal: '#2563eb',
   })[receiptSettings.accent] || '#059669';
   const receiptAddress = String(receiptSettings.storeAddress || '').trim();
+  const receiptPhone = String(receiptSettings.storePhone || '').trim();
   const receiptFooter = String(receiptSettings.footerNote || '').trim();
   const receiptTitle = receiptSettings.mode === 'thermal'
     ? 'STRUK PEMBAYARAN'
@@ -609,13 +615,16 @@ function createPosReceiptSvg(transaction, businessName, receiptSettings = defaul
   const lines = [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`,
     `<rect width="${width}" height="${height}" rx="28" fill="#ffffff"/>`,
-    '<rect x="28" y="28" width="844" height="174" rx="22" fill="#f8fafc"/>',
+    '<rect x="28" y="28" width="844" height="210" rx="22" fill="#f8fafc"/>',
     `<rect x="56" y="58" width="72" height="72" rx="18" fill="${accentColor}"/>`,
-    '<text x="92" y="106" fill="#ffffff" font-family="Arial,sans-serif" font-size="30" font-weight="700" text-anchor="middle">KU</text>',
+    logoHref
+      ? `<image href="${escapeSvgText(logoHref)}" x="62" y="64" width="60" height="60" preserveAspectRatio="xMidYMid meet"/>`
+      : `<text x="92" y="106" fill="#ffffff" font-family="Arial,sans-serif" font-size="30" font-weight="700" text-anchor="middle">${escapeSvgText(initialsFor(businessName))}</text>`,
     `<text x="154" y="84" fill="#26352e" font-family="Arial,sans-serif" font-size="30" font-weight="700" ${businessNameFit}>${escapeSvgText(businessName)}</text>`,
     `<text x="154" y="126" fill="${accentColor}" font-family="Arial,sans-serif" font-size="20" font-weight="700">${receiptTitle}</text>`,
     `<text x="154" y="160" fill="#68736d" font-family="Arial,sans-serif" font-size="17">No. Nota: ${escapeSvgText(transaction.receiptNumber)}</text>`,
     ...(receiptAddress ? [`<text x="154" y="190" fill="#68736d" font-family="Arial,sans-serif" font-size="15">${escapeSvgText(receiptAddress)}</text>`] : []),
+    ...(receiptPhone ? [`<text x="154" y="${receiptAddress ? 214 : 190}" fill="#68736d" font-family="Arial,sans-serif" font-size="15">${escapeSvgText(receiptPhone)}</text>`] : []),
     `<text x="56" y="248" fill="#758078" font-family="Arial,sans-serif" font-size="17">PELANGGAN</text>`,
     `<text x="56" y="280" fill="#26352e" font-family="Arial,sans-serif" font-size="23" font-weight="700">${escapeSvgText(transaction.customer || 'Pelanggan umum')}</text>`,
     `<text x="844" y="248" fill="#758078" font-family="Arial,sans-serif" font-size="17" text-anchor="end">${escapeSvgText(date)}</text>`,
@@ -1151,6 +1160,7 @@ function App() {
   const [financeEntries, setFinanceEntries] = useState([]);
   const [workspaceBranches, setWorkspaceBranches] = useState([]);
   const [dealerMotorUnits, setDealerMotorUnits] = useState(previewDealerMotorUnits);
+  const [dealerMotorIntakes, setDealerMotorIntakes] = useState([]);
   const [dealerMotorMovements, setDealerMotorMovements] = useState([]);
   const [financeBranchId, setFinanceBranchId] = useState('');
   const [financeDraft, setFinanceDraft] = useState({
@@ -2153,6 +2163,7 @@ function App() {
     setUsers([user]);
     setActiveUserId(user.id);
     setDealerMotorUnits([]);
+    setDealerMotorIntakes([]);
     setDealerMotorMovements([]);
     setSpks([]);
     setWorkspaceBranches([]);
@@ -2270,7 +2281,11 @@ function App() {
     : null;
   const ownerTrialCountdown = ownerTrialEnd ? getCountdown(ownerTrialEnd, countdownNow) : null;
   const activeThemeColors = getThemeColors(themeSettings);
-  const receiptSettings = themeSettings.receiptSettings || defaultThemeSettings.receiptSettings;
+  const receiptSettings = {
+    ...defaultThemeSettings.receiptSettings,
+    ...themeSettings.receiptSettings,
+    logoUrl: themeSettings.logoUrl,
+  };
   const canManageTheme = ['OWNER', 'SUPER ADMIN'].includes(activeUser.role);
   const activeReceiptAccent = receiptAccents.find(({ id }) => id === receiptSettings.accent) || receiptAccents[0];
   const availableAccessModules = accessModules.filter(({ id }) => (
@@ -2921,7 +2936,8 @@ function App() {
         const unitsResult = unitsIndex >= 0 ? await responses[unitsIndex].json() : null;
         const branchesResult = branchesIndex >= 0 ? await responses[branchesIndex].json() : null;
         const spksResult = spksIndex >= 0 ? await responses[spksIndex].json() : null;
-        if ((unitsResult && (!Array.isArray(unitsResult.units) || !Array.isArray(unitsResult.movements)))
+        if ((unitsResult && (!Array.isArray(unitsResult.units) || !Array.isArray(unitsResult.movements)
+          || !Array.isArray(unitsResult.intakes)))
           || (branchesResult && !Array.isArray(branchesResult.branches))
           || (spksResult && !Array.isArray(spksResult.spks))) {
           throw new Error('Data stok, cabang, atau SPK dari server tidak valid.');
@@ -2929,6 +2945,7 @@ function App() {
         if (cancelled) return;
         if (unitsResult) {
           setDealerMotorUnits(unitsResult.units);
+          setDealerMotorIntakes(unitsResult.intakes);
           setDealerMotorMovements(unitsResult.movements);
         }
         if (branchesResult) setWorkspaceBranches(branchesResult.branches);
@@ -3225,6 +3242,7 @@ function App() {
       setWorkspaceUrl('');
       setSpks(initialSpks);
       setDealerMotorUnits([]);
+      setDealerMotorIntakes([]);
       setDealerMotorMovements([]);
       setWorkspaceBranches([]);
       setBusinessProfile({ name: '', address: '', logoUrl: '', qrisUrl: '' });
@@ -3705,14 +3723,24 @@ function App() {
                     </button>)}
                   </div>
                 </div>
-                <label className="field"><span>Alamat / kontak pada nota</span><input
+                <label className="field"><span>Alamat usaha pada nota</span><input
                   maxLength="240"
                   onChange={(event) => setThemeSettings((current) => ({
                     ...current,
                     receiptSettings: { ...current.receiptSettings, storeAddress: event.target.value },
                   }))}
-                  placeholder="Contoh: Jl. Melati Raya No. 18 · WA 0812..."
+                  placeholder="Contoh: Jl. Melati Raya No. 18, Jakarta"
                   value={receiptSettings.storeAddress}
+                /></label>
+                <label className="field"><span>Kontak / WhatsApp pada nota</span><input
+                  autoComplete="tel"
+                  maxLength="32"
+                  onChange={(event) => setThemeSettings((current) => ({
+                    ...current,
+                    receiptSettings: { ...current.receiptSettings, storePhone: event.target.value },
+                  }))}
+                  placeholder="Contoh: 0812-3456-7890"
+                  value={receiptSettings.storePhone}
                 /></label>
                 <label className="field"><span>Catatan kaki nota</span><textarea
                   maxLength="240"
@@ -3923,8 +3951,9 @@ function App() {
                   <div className="motor-receipt-business">
                     {themeSettings.logoUrl
                       ? <img alt="" src={themeSettings.logoUrl} />
-                      : <span className="motor-receipt-mark">KU</span>}
+                      : <span className="motor-receipt-mark">{initialsFor(workspaceName)}</span>}
                     <strong>{workspaceName}</strong>
+                    {(receiptSettings.storeAddress || receiptSettings.storePhone) && <small>{[receiptSettings.storeAddress, receiptSettings.storePhone].filter(Boolean).join(' · ')}</small>}
                   </div>
                   <div className="motor-receipt-title"><h2>KWITANSI</h2><strong>{receipt.receiptNumber}</strong><small>SPK {receipt.spkNumber}</small></div>
                   <div className="motor-receipt-date"><strong>Tgl</strong><span>{receipt.dateLabel}</span><small>No. {receipt.receiptNumber}</small></div>
@@ -3949,6 +3978,7 @@ function App() {
                   <span>{receipt.city}, {receipt.dateLabel}</span>
                 </div>
                 <div className="motor-receipt-validity">Kwitansi dianggap sah apabila pembayaran telah diterima.</div>
+                {receiptSettings.footerNote && <div className="motor-receipt-custom-footer">{receiptSettings.footerNote}</div>}
                 <div className="motor-receipt-signature"><span>Pembeli</span><span>Penerima</span></div>
                 <div className="receipt-actions">
                   <button className="button button-quiet receipt-print" onClick={() => printMotorReceipt(receipt.receiptNumber)} type="button">Cetak kwitansi</button>
@@ -3964,7 +3994,7 @@ function App() {
                 key={transaction.receiptNumber}
                 style={{ '--receipt-accent': activeReceiptAccent.color, '--receipt-accent-background': activeReceiptAccent.background }}
               >
-                <div className="receipt-heading"><div><span className="receipt-status">{transaction.paymentStatus}</span><h2>{workspaceName}</h2>{receiptSettings.storeAddress && <p className="receipt-business-address">{receiptSettings.storeAddress}</p>}<p>No. Nota: {transaction.receiptNumber}</p></div><span className="receipt-mark">KU</span></div>
+                <div className="receipt-heading"><div><span className="receipt-status">{transaction.paymentStatus}</span><h2>{workspaceName}</h2>{receiptSettings.storeAddress && <p className="receipt-business-address">{receiptSettings.storeAddress}</p>}{receiptSettings.storePhone && <p>{receiptSettings.storePhone}</p>}<p>No. Nota: {transaction.receiptNumber}</p></div><span className="receipt-mark">{themeSettings.logoUrl ? <img alt="" src={themeSettings.logoUrl} /> : initialsFor(workspaceName)}</span></div>
                 <div className="receipt-customer"><span>Pelanggan</span><strong>{transaction.customer}</strong>{transaction.tableNumber && <small>Meja {transaction.tableNumber} · {transaction.paymentTiming}</small>}<small>{new Intl.DateTimeFormat('id-ID', { dateStyle: 'long', timeStyle: 'short' }).format(new Date(transaction.createdAt))}</small></div>
                 <div className="receipt-lines">{transaction.items.map((item) => <div className="receipt-line" key={item.id}><span>{item.name}<small>{item.quantity} {item.unit} × {rupiah(item.price)}</small></span><strong>{rupiah(item.quantity * item.price)}</strong></div>)}</div>
                 <div className="receipt-total"><span>Total pembayaran</span><strong>{rupiah(transaction.total)}</strong></div>
@@ -3985,6 +4015,7 @@ function App() {
           <DealerMotorWorkspace
             branches={workspaceBranches}
             canManage={isAuthenticated && activeUser.permissions.includes('unitManage')}
+            intakes={dealerMotorIntakes}
             movements={dealerMotorMovements}
             notice={notice}
             onCreate={async (unit) => {
@@ -3996,10 +4027,31 @@ function App() {
               });
               const result = await response.json();
               if (!response.ok) throw new Error(result.message || 'Unit kendaraan tidak dapat disimpan.');
-              if (!result.unit?.id || !result.movement?.id) throw new Error('Data unit kendaraan dari server tidak valid.');
+              if (!result.intake?.id || !result.movement?.id) {
+                throw new Error('Data penerimaan stok dari server tidak valid.');
+              }
+              setDealerMotorIntakes((current) => [result.intake, ...current]);
+              setDealerMotorMovements((current) => [result.movement, ...current]);
+              setNotice(`${result.intake.quantityReceived} unit berhasil dicatat dan menunggu inspeksi.`);
+            }}
+            onCompleteInspection={async (intakeId, identifiers) => {
+              const response = await fetch(`/api/dealer-motor/intakes/${intakeId}/units`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(identifiers),
+              });
+              const result = await response.json();
+              if (!response.ok) throw new Error(result.message || 'Identitas unit tidak dapat disimpan.');
+              if (!result.unit?.id || !result.movement?.id || !result.intake?.id) {
+                throw new Error('Data inspeksi unit dari server tidak valid.');
+              }
+              setDealerMotorIntakes((current) => current.map((intake) => (
+                intake.id === result.intake.id ? { ...intake, ...result.intake } : intake
+              )));
               setDealerMotorUnits((current) => [result.unit, ...current]);
               setDealerMotorMovements((current) => [result.movement, ...current]);
-              setNotice('Unit kendaraan berhasil disimpan ke stok cabang.');
+              setNotice('Identitas unit tercatat; unit kini tersedia untuk transaksi SPK.');
+              return result.intake;
             }}
             units={dealerMotorUnits}
           />
@@ -4234,9 +4286,7 @@ function App() {
         ) : activePage === 'Dashboard' && isAuthenticated && activeUser.role !== 'PLATFORM_OWNER' ? (
           <IndustryDashboard
             businessType={businessType}
-            canManageInventory={activeUser.permissions.includes('unitManage')}
             onActivate={() => openPage('Aktivasi')}
-            onManageInventory={() => openPage('Semua Unit')}
             role={activeUser.role}
             trialCountdown={ownerTrialCountdown}
             trialEndsAt={ownerTrialEnd}
@@ -4391,5 +4441,5 @@ function App() {
   );
 }
 
-export { createPosReceiptSvg };
+export { createPosReceiptSvg, getUserMenus };
 export default App;

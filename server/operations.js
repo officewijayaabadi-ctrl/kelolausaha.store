@@ -435,19 +435,28 @@ export function createOperationsRouter({ pool, authenticate, requireTenant, requ
           ? pool.query(
             `WITH unit_metrics AS (
                SELECT
-                   COUNT(*) FILTER (
+                (COUNT(*) FILTER (
                      WHERE stock_status NOT IN ('delivered', 'cancelled', 'returned')
-                   )::int AS "totalUnits",
+                  ) + COALESCE((SELECT SUM(quantity_remaining)
+                      FROM dealer_motor_stock_intakes
+                      WHERE company_id = $1 AND ($2::uuid IS NULL OR branch_id = $2)), 0))::int AS "totalUnits",
                  COUNT(*) FILTER (WHERE stock_status = 'available')::int AS "availableUnits",
                  COUNT(*) FILTER (WHERE stock_status = 'reserved')::int AS "reservedUnits",
                  COUNT(*) FILTER (WHERE stock_status = 'approved_for_delivery')::int AS "readyDeliveryUnits",
                  COUNT(*) FILTER (WHERE stock_status = 'in_delivery')::int AS "inDeliveryUnits",
                  COUNT(*) FILTER (WHERE stock_status = 'delivered')::int AS "deliveredUnits",
-                 COUNT(*) FILTER (WHERE stock_status IN ('waiting_receipt', 'in_inspection'))::int AS "incomingUnits",
-                 COUNT(*) FILTER (
+                 (COUNT(*) FILTER (WHERE stock_status IN ('waiting_receipt', 'in_inspection'))
+                   + COALESCE((SELECT SUM(quantity_remaining)
+                       FROM dealer_motor_stock_intakes
+                       WHERE company_id = $1 AND ($2::uuid IS NULL OR branch_id = $2)), 0))::int AS "incomingUnits",
+                 (COUNT(*) FILTER (
                    WHERE stock_origin = 'incoming'
                      AND stock_entry_date >= date_trunc('month', current_date)::date
-                 )::int AS "incomingThisMonth"
+                 ) + COALESCE((SELECT SUM(quantity_remaining)
+                     FROM dealer_motor_stock_intakes
+                     WHERE company_id = $1 AND ($2::uuid IS NULL OR branch_id = $2)
+                       AND stock_origin = 'incoming'
+                       AND stock_entry_date >= date_trunc('month', current_date)::date), 0))::int AS "incomingThisMonth"
                FROM dealer_motor_units
                WHERE company_id = $1 AND ($2::uuid IS NULL OR branch_id = $2)
              ), spk_metrics AS (

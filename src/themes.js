@@ -27,6 +27,7 @@ export const defaultThemeSettings = {
     mode: 'digital',
     accent: 'crimson',
     storeAddress: '',
+    storePhone: '',
     footerNote: 'Terima kasih atas kepercayaan Anda.',
   },
 };

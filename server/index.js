@@ -1256,6 +1256,7 @@ app.put('/api/workspace/theme', authenticate, requireRole('SUPER ADMIN', 'OWNER'
       mode: receiptSettings?.mode,
       accent: receiptSettings?.accent,
       storeAddress: typeof receiptSettings?.storeAddress === 'string' ? receiptSettings.storeAddress.trim() : '',
+      storePhone: typeof receiptSettings?.storePhone === 'string' ? receiptSettings.storePhone.trim() : '',
       footerNote: typeof receiptSettings?.footerNote === 'string' ? receiptSettings.footerNote.trim() : '',
     };
   }
@@ -1267,6 +1268,8 @@ app.put('/api/workspace/theme', authenticate, requireRole('SUPER ADMIN', 'OWNER'
     && ['emerald', 'crimson', 'royal'].includes(receiptSettings.accent)
     && typeof receiptSettings.storeAddress === 'string'
     && receiptSettings.storeAddress.length <= 240
+    && (receiptSettings.storePhone === undefined
+      || (typeof receiptSettings.storePhone === 'string' && receiptSettings.storePhone.length <= 32))
     && typeof receiptSettings.footerNote === 'string'
     && receiptSettings.footerNote.length <= 240
   );

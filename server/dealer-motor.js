@@ -5,6 +5,86 @@ import express from 'express';
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+const hondaCatalogCache = { products: [], fetchedAt: 0, specifications: new Map() };
+const hondaCatalogUrl = 'https://www.astra-honda.com/api/v1';
+const hondaCatalogCacheDuration = 24 * 60 * 60 * 1000;
+
+async function fetchHondaJson(url) {
+  const response = await fetch(url, {
+    headers: { Accept: 'application/json' },
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!response.ok) throw new Error(`Katalog Honda merespons HTTP ${response.status}.`);
+  return response.json();
+}
+
+function normalizeHondaProduct(product) {
+  if (!product || !['string', 'number'].includes(typeof product.id)
+    || typeof product.slug !== 'string' || typeof product.title !== 'string') return null;
+  const modelYear = Array.isArray(product.years)
+    ? Number(product.years.find((year) => /^\d{4}$/.test(String(year))))
+    : NaN;
+  return {
+    id: String(product.id),
+    slug: product.slug,
+    name: product.title.trim(),
+    category: typeof product.category?.title === 'string' ? product.category.title.trim() : 'Honda',
+    modelYear: Number.isInteger(modelYear) ? modelYear : new Date().getFullYear(),
+    price: Number.isSafeInteger(Number(product.prices?.value)) ? Number(product.prices.value) : 0,
+    colors: Array.isArray(product.colors)
+      ? product.colors
+        .map((color) => typeof color?.title === 'string' ? color.title.trim() : '')
+        .filter(Boolean)
+      : [],
+  };
+}
+
+function getHondaSpecification(detail) {
+  const sections = detail?.spesifications || detail?.specifications;
+  if (!Array.isArray(sections)) return '';
+  const entries = sections.flatMap((section) => (
+    Array.isArray(section?.details) ? section.details : [section]
+  ));
+  const entry = entries.find((item) => {
+    const label = String(item?.title || item?.name || '').toLowerCase();
+    return /volume|langkah|kapasitas|mesin|cc/.test(label);
+  });
+  const value = entry?.summary || entry?.value || entry?.description;
+  return typeof value === 'string' ? value.trim().slice(0, 120) : '';
+}
+
+async function loadHondaCatalog() {
+  if (hondaCatalogCache.products.length
+    && Date.now() - hondaCatalogCache.fetchedAt < hondaCatalogCacheDuration) {
+    return { products: hondaCatalogCache.products, stale: false };
+  }
+
+  try {
+    const categories = await fetchHondaJson(`${hondaCatalogUrl}/product/category`);
+    if (!Array.isArray(categories)) throw new Error('Daftar kategori katalog Honda tidak valid.');
+    const activeCategories = categories.filter((category) => (
+      ['string', 'number'].includes(typeof category?.id) && category.redirectUrl == null
+    ));
+    const productLists = await Promise.all(activeCategories.map(async (category) => {
+      const products = await fetchHondaJson(
+        `${hondaCatalogUrl}/product?category=${encodeURIComponent(category.id)}`,
+      );
+      if (!Array.isArray(products)) throw new Error('Daftar model katalog Honda tidak valid.');
+      return products.map(normalizeHondaProduct).filter(Boolean);
+    }));
+    const products = productLists.flat();
+    if (!products.length) throw new Error('Katalog Honda tidak memiliki model yang dapat dipilih.');
+    hondaCatalogCache.products = products;
+    hondaCatalogCache.fetchedAt = Date.now();
+    hondaCatalogCache.specifications.clear();
+    return { products, stale: false };
+  } catch (error) {
+    if (hondaCatalogCache.products.length) {
+      return { products: hondaCatalogCache.products, stale: true };
+    }
+    throw error;
+  }
+}
 
 function invalid(message, status = 400) {
   const error = new Error(message);
@@ -49,15 +129,18 @@ function normalizeUnit(body) {
   const engineNumber = typeof body.engineNumber === 'string' ? body.engineNumber.trim().toUpperCase() : '';
   const modelYear = Number(body.modelYear);
   const otrPrice = Number(body.otrPrice);
+  const quantity = Number(body.quantity ?? 1);
+  const identifiersPending = body.identifiersPending === true;
   if (!brand || brand.length > 80 || !model || model.length > 120
     || !specification || specification.length > 120 || !color || color.length > 80
-    || !frameNumber || frameNumber.length > 80 || !engineNumber || engineNumber.length > 80
+    || (!identifiersPending && (!frameNumber || frameNumber.length > 80 || !engineNumber || engineNumber.length > 80))
+    || (identifiersPending && (!Number.isInteger(quantity) || quantity < 1 || quantity > 1000))
     || !Number.isInteger(modelYear) || modelYear < 1980 || modelYear > 2100
     || !Number.isSafeInteger(otrPrice) || otrPrice < 0
     || !uuidPattern.test(String(body.branchId || ''))
     || !['opening', 'incoming'].includes(body.stockOrigin)
     || !validDate(body.stockEntryDate)) {
-    throw invalid('Lengkapi spesifikasi kendaraan, nomor rangka/mesin, cabang, tanggal, dan harga dengan benar.');
+    throw invalid('Lengkapi nama, spesifikasi, warna, cabang, tanggal masuk, harga, dan jumlah unit dengan benar.');
   }
   return {
     brand,
@@ -71,6 +154,8 @@ function normalizeUnit(body) {
     branchId: body.branchId,
     stockOrigin: body.stockOrigin,
     stockEntryDate: body.stockEntryDate,
+    quantity: identifiersPending ? quantity : 1,
+    identifiersPending,
     vehicleCategory,
     receivingInvoice: receivingInvoice || null,
     supplierName: supplierName || null,
@@ -136,6 +221,38 @@ export function createDealerMotorRouter({
   const router = express.Router();
   const photoUpload = upload.single('photo');
 
+  router.get('/catalog', authenticate, requireTenant, requireActiveTenant,
+    requirePermission('unitManage'), async (req, res) => {
+      try {
+        const catalog = await loadHondaCatalog();
+        res.json(catalog);
+      } catch (error) {
+        console.error('Dealer Honda catalog unavailable:', error.message);
+        res.status(502).json({ message: 'Katalog Honda belum dapat dimuat. Coba lagi atau ketik nama motor secara manual.' });
+      }
+    });
+
+  router.get('/catalog/:slug', authenticate, requireTenant, requireActiveTenant,
+    requirePermission('unitManage'), async (req, res) => {
+      try {
+        const catalog = await loadHondaCatalog();
+        const product = catalog.products.find((item) => item.slug === req.params.slug);
+        if (!product) return res.status(404).json({ message: 'Model tidak ditemukan di katalog Honda.' });
+        let specification = hondaCatalogCache.specifications.get(product.slug);
+        if (!specification) {
+          const detail = await fetchHondaJson(
+            `${hondaCatalogUrl}/product/${encodeURIComponent(product.slug)}`,
+          );
+          specification = getHondaSpecification(detail) || product.category;
+          hondaCatalogCache.specifications.set(product.slug, specification);
+        }
+        res.json({ product: { ...product, specification } });
+      } catch (error) {
+        console.error('Dealer Honda model specification unavailable:', error.message);
+        res.status(502).json({ message: 'Spesifikasi model belum dapat dimuat dari katalog Honda.' });
+      }
+    });
+
   router.get('/units', authenticate, requireTenant, requireActiveTenant,
     requirePermission('unitManage', 'spkCreate'), async (req, res, next) => {
       try {
@@ -149,6 +266,7 @@ export function createDealerMotorRouter({
                   u.vehicle_category AS "vehicleCategory",
                   u.receiving_invoice AS "receivingInvoice",
                   u.supplier_name AS "supplierName",
+                  u.stock_intake_id AS "stockIntakeId",
                   u.inspection_status AS "inspectionStatus",
                   u.scratch_status AS "scratchStatus",
                   u.pdi_status AS "pdiStatus",
@@ -162,15 +280,42 @@ export function createDealerMotorRouter({
           [req.user.company_id, canViewAllBranches, req.user.branch_id],
         );
         const summary = await pool.query(
-          `SELECT COUNT(*) FILTER (WHERE stock_origin = 'opening')::int AS "openingStock",
-                  COUNT(*) FILTER (WHERE stock_origin = 'incoming')::int AS "incomingStock",
+          `SELECT (COUNT(*) FILTER (WHERE stock_origin = 'opening')
+                    + COALESCE((SELECT SUM(quantity_remaining) FROM dealer_motor_stock_intakes
+                                WHERE company_id = $1 AND ($2::boolean OR branch_id = $3)
+                                  AND stock_origin = 'opening'), 0))::int AS "openingStock",
+                  (COUNT(*) FILTER (WHERE stock_origin = 'incoming')
+                    + COALESCE((SELECT SUM(quantity_remaining) FROM dealer_motor_stock_intakes
+                                WHERE company_id = $1 AND ($2::boolean OR branch_id = $3)
+                                  AND stock_origin = 'incoming'), 0))::int AS "incomingStock",
+                  (COUNT(*) FILTER (WHERE stock_status = 'in_inspection')
+                    + COALESCE((SELECT SUM(quantity_remaining) FROM dealer_motor_stock_intakes
+                                WHERE company_id = $1 AND ($2::boolean OR branch_id = $3)), 0))::int AS "awaitingInspection",
                   COUNT(*) FILTER (WHERE stock_status = 'reserved')::int AS "reservedStock",
                   COUNT(*) FILTER (WHERE stock_status = 'available')::int AS "availableStock",
                   COUNT(*) FILTER (WHERE stock_status = 'approved_for_delivery')::int AS "readyForDelivery",
                   COUNT(*) FILTER (WHERE stock_status = 'in_delivery')::int AS "inDelivery",
                   COUNT(*) FILTER (WHERE stock_status = 'delivered')::int AS "deliveredStock"
-           FROM dealer_motor_units WHERE company_id = $1`,
-          [req.user.company_id],
+           FROM dealer_motor_units
+           WHERE company_id = $1 AND ($2::boolean OR branch_id = $3)`,
+          [req.user.company_id, canViewAllBranches, req.user.branch_id],
+        );
+        const intakes = await pool.query(
+          `SELECT i.id, i.branch_id AS "branchId", b.name AS "branchName",
+                  i.brand, i.model, i.specification, i.model_year AS "modelYear", i.color,
+                  i.otr_price AS "otrPrice", i.stock_origin AS "stockOrigin",
+                  i.vehicle_category AS "vehicleCategory",
+                  i.receiving_invoice AS "receivingInvoice", i.supplier_name AS "supplierName",
+                  i.quantity_received AS "quantityReceived",
+                  i.quantity_remaining AS "quantityRemaining", i.status,
+                  to_char(i.stock_entry_date, 'YYYY-MM-DD') AS "stockEntryDate",
+                  i.created_at AS "createdAt", actor.name AS "createdByName"
+           FROM dealer_motor_stock_intakes i
+           JOIN business_branches b ON b.id = i.branch_id AND b.company_id = i.company_id
+           LEFT JOIN users actor ON actor.id = i.created_by AND actor.company_id = i.company_id
+           WHERE i.company_id = $1 AND ($2::boolean OR i.branch_id = $3)
+           ORDER BY i.created_at DESC LIMIT 1000`,
+          [req.user.company_id, canViewAllBranches, req.user.branch_id],
         );
         const movements = await pool.query(
           `SELECT e.id, e.event_type AS "eventType", e.note, e.details,
@@ -187,7 +332,30 @@ export function createDealerMotorRouter({
            ORDER BY e.created_at DESC, e.id DESC LIMIT 500`,
           [req.user.company_id, canViewAllBranches, req.user.branch_id],
         );
-        res.json({ units: result.rows, summary: summary.rows[0], movements: movements.rows });
+        const intakeMovements = intakes.rows.map((intake) => ({
+          id: `intake-${intake.id}`,
+          eventType: 'received',
+          note: `Penerimaan ${intake.quantityReceived} unit; ${intake.quantityRemaining} menunggu inspeksi.`,
+          details: { quantityReceived: intake.quantityReceived, quantityRemaining: intake.quantityRemaining },
+          quantity: intake.quantityReceived,
+          createdAt: intake.createdAt,
+          brand: intake.brand,
+          model: intake.model,
+          specification: intake.specification,
+          frameNumber: null,
+          branchName: intake.branchName,
+          createdByName: intake.createdByName,
+          spkNumber: null,
+        }));
+        const movementRows = [...movements.rows, ...intakeMovements]
+          .sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt))
+          .slice(0, 500);
+        res.json({
+          units: result.rows,
+          intakes: intakes.rows,
+          summary: summary.rows[0],
+          movements: movementRows,
+        });
       } catch (error) {
         next(error);
       }
@@ -202,6 +370,47 @@ export function createDealerMotorRouter({
           [unit.branchId, req.user.company_id],
         );
         if (!branch.rowCount) return res.status(400).json({ message: 'Cabang unit motor tidak valid.' });
+        if (unit.identifiersPending) {
+          const intake = await pool.query(
+            `INSERT INTO dealer_motor_stock_intakes
+               (company_id, branch_id, created_by, brand, model, specification, model_year,
+                color, otr_price, stock_origin, stock_entry_date, vehicle_category,
+                receiving_invoice, supplier_name, quantity_received, quantity_remaining)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $15)
+             RETURNING id, branch_id AS "branchId", brand, model, specification,
+                       model_year AS "modelYear", color, otr_price AS "otrPrice",
+                       stock_origin AS "stockOrigin",
+                       to_char(stock_entry_date, 'YYYY-MM-DD') AS "stockEntryDate",
+                       vehicle_category AS "vehicleCategory",
+                       receiving_invoice AS "receivingInvoice", supplier_name AS "supplierName",
+                       quantity_received AS "quantityReceived",
+                       quantity_remaining AS "quantityRemaining", status,
+                       created_at AS "createdAt"`,
+            [req.user.company_id, unit.branchId, req.user.id, unit.brand, unit.model,
+              unit.specification, unit.modelYear, unit.color, unit.otrPrice, unit.stockOrigin,
+              unit.stockEntryDate, unit.vehicleCategory, unit.receivingInvoice,
+              unit.supplierName, unit.quantity],
+          );
+          const savedIntake = {
+            ...intake.rows[0],
+            branchName: branch.rows[0].name,
+            createdByName: req.user.name,
+          };
+          res.status(201).json({
+            intake: savedIntake,
+            movement: {
+              ...savedIntake,
+              id: `intake-${savedIntake.id}`,
+              eventType: 'received',
+              note: `Penerimaan ${savedIntake.quantityReceived} unit; menunggu inspeksi.`,
+              details: { quantityReceived: savedIntake.quantityReceived },
+              quantity: savedIntake.quantityReceived,
+              createdAt: savedIntake.createdAt,
+              spkNumber: null,
+            },
+          });
+          return;
+        }
         const result = await withTransaction(pool, async (client) => {
           const inserted = await client.query(
             `INSERT INTO dealer_motor_units
@@ -227,7 +436,8 @@ export function createDealerMotorRouter({
             `INSERT INTO dealer_motor_unit_events
                (company_id, unit_id, created_by, event_type, note)
              VALUES ($1, $2, $3, $4, $5)
-             RETURNING id, event_type AS "eventType", note, details, created_at AS "createdAt"`,
+             RETURNING id, unit_id AS "unitId", event_type AS "eventType",
+                       note, details, created_at AS "createdAt"`,
             [req.user.company_id, inserted.rows[0].id, req.user.id, unit.stockOrigin,
               unit.stockOrigin === 'opening' ? 'Saldo stok awal' : 'Motor masuk'],
           );
@@ -244,6 +454,97 @@ export function createDealerMotorRouter({
             spkNumber: null,
           },
         });
+      } catch (error) {
+        if (error.code === '23505') {
+          return res.status(409).json({ message: 'Nomor rangka atau nomor mesin sudah tercatat di workspace ini.' });
+        }
+        if (error.status) return res.status(error.status).json({ message: error.message });
+        next(error);
+      }
+    });
+
+  router.post('/intakes/:id/units', authenticate, requireTenant, requireActiveTenant,
+    requirePermission('unitManage'), async (req, res, next) => {
+      if (!uuidPattern.test(req.params.id)) return res.status(400).json({ message: 'Penerimaan stok tidak valid.' });
+      const frameNumber = typeof req.body.frameNumber === 'string'
+        ? req.body.frameNumber.trim().toUpperCase() : '';
+      const engineNumber = typeof req.body.engineNumber === 'string'
+        ? req.body.engineNumber.trim().toUpperCase() : '';
+      if (!frameNumber || frameNumber.length > 80 || !engineNumber || engineNumber.length > 80) {
+        return res.status(400).json({ message: 'Nomor rangka dan nomor mesin wajib diisi.' });
+      }
+      try {
+        const result = await withTransaction(pool, async (client) => {
+          const intakeResult = await client.query(
+            `SELECT id, branch_id AS "branchId", brand, model, specification,
+                    model_year AS "modelYear", color, otr_price AS "otrPrice",
+                    stock_origin AS "stockOrigin",
+                    to_char(stock_entry_date, 'YYYY-MM-DD') AS "stockEntryDate",
+                    vehicle_category AS "vehicleCategory",
+                    receiving_invoice AS "receivingInvoice", supplier_name AS "supplierName",
+                    quantity_remaining AS "quantityRemaining"
+             FROM dealer_motor_stock_intakes
+             WHERE id = $1 AND company_id = $2 AND status = 'pending'
+             FOR UPDATE`,
+            [req.params.id, req.user.company_id],
+          );
+          if (!intakeResult.rowCount || intakeResult.rows[0].quantityRemaining < 1) {
+            throw invalid('Penerimaan ini tidak memiliki unit yang menunggu inspeksi.', 409);
+          }
+          const intake = intakeResult.rows[0];
+          const inserted = await client.query(
+            `INSERT INTO dealer_motor_units
+               (company_id, branch_id, created_by, brand, model, specification, model_year,
+                color, frame_number, engine_number, otr_price, stock_origin, stock_entry_date,
+                vehicle_category, receiving_invoice, supplier_name, stock_intake_id, inspection_status)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 'inspected')
+             RETURNING id, branch_id AS "branchId", brand, model, specification,
+                       model_year AS "modelYear", color, frame_number AS "frameNumber",
+                       engine_number AS "engineNumber", otr_price AS "otrPrice",
+                       stock_origin AS "stockOrigin", stock_status AS "stockStatus",
+                       inspection_status AS "inspectionStatus", vehicle_category AS "vehicleCategory",
+                       stock_intake_id AS "stockIntakeId",
+                       receiving_invoice AS "receivingInvoice", supplier_name AS "supplierName",
+                       to_char(stock_entry_date, 'YYYY-MM-DD') AS "stockEntryDate",
+                       status_updated_at AS "statusUpdatedAt", created_at AS "createdAt"`,
+            [req.user.company_id, intake.branchId, req.user.id, intake.brand, intake.model,
+              intake.specification, intake.modelYear, intake.color, frameNumber, engineNumber,
+              intake.otrPrice, intake.stockOrigin, intake.stockEntryDate, intake.vehicleCategory,
+              intake.receivingInvoice, intake.supplierName, intake.id],
+          );
+          const remaining = intake.quantityRemaining - 1;
+          const updatedIntake = await client.query(
+            `UPDATE dealer_motor_stock_intakes
+             SET quantity_remaining = $1, status = $2, updated_at = now()
+             WHERE id = $3 AND company_id = $4
+             RETURNING id, quantity_received AS "quantityReceived",
+                       quantity_remaining AS "quantityRemaining", status`,
+            [remaining, remaining === 0 ? 'completed' : 'pending', req.params.id, req.user.company_id],
+          );
+          const event = await client.query(
+            `INSERT INTO dealer_motor_unit_events
+               (company_id, unit_id, created_by, event_type, note)
+             VALUES ($1, $2, $3, 'inspection_completed', 'Inspeksi selesai; nomor rangka dan mesin telah dicatat.')
+             RETURNING id, event_type AS "eventType", note, details, created_at AS "createdAt"`,
+            [req.user.company_id, inserted.rows[0].id, req.user.id],
+          );
+          const branch = await client.query(
+            'SELECT name FROM business_branches WHERE id = $1 AND company_id = $2',
+            [intake.branchId, req.user.company_id],
+          );
+          const unit = { ...inserted.rows[0], branchName: branch.rows[0].name };
+          return {
+            unit,
+            intake: { id: req.params.id, ...updatedIntake.rows[0] },
+            movement: {
+              ...event.rows[0],
+              ...unit,
+              createdByName: req.user.name,
+              spkNumber: null,
+            },
+          };
+        });
+        res.status(201).json(result);
       } catch (error) {
         if (error.code === '23505') {
           return res.status(409).json({ message: 'Nomor rangka atau nomor mesin sudah tercatat di workspace ini.' });
