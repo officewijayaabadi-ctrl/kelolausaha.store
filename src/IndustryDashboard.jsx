@@ -34,6 +34,8 @@ export default function IndustryDashboard({
   trialCountdown,
   trialEndsAt,
   onActivate,
+  canManageInventory = false,
+  onManageInventory,
 }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -94,6 +96,9 @@ export default function IndustryDashboard({
           <h1>Dashboard</h1>
           <p>Pantau operasional <strong>{workspaceName}</strong> berdasarkan data workspace Anda.</p>
         </div>
+        {isDealer && canManageInventory && <button className="button button-primary" onClick={onManageInventory} type="button">
+          <span className="plus">+</span> Input stok tambahan
+        </button>}
       </div>
 
       {isOwner && trialCountdown && <section aria-label="Hitung mundur masa demo" className="owner-trial-countdown" role="status">
@@ -129,6 +134,7 @@ export default function IndustryDashboard({
         <div className="stats-grid">
           {isDealer ? <>
             <article className="stat-card stat-shadow dealer-kpi-primary"><div className="stat-top"><span>Total stok kendaraan</span><span className="stat-icon blue">K</span></div><strong>{dealer.totalUnits || 0}</strong><div className="stat-foot"><span>{dealer.availableUnits || 0} unit siap dijual</span></div></article>
+            <article className="stat-card stat-shadow"><div className="stat-top"><span>Stok masuk bulan ini</span><span className="stat-icon green">＋</span></div><strong>{dealer.incomingThisMonth || 0}</strong><div className="stat-foot"><span>Kendaraan tambahan diterima</span></div></article>
             <article className="stat-card stat-shadow"><div className="stat-top"><span>SPK aktif</span><span className="stat-icon orange">SPK</span></div><strong>{dealer.activeSpks || 0}</strong><div className="stat-foot"><span>{dealer.approvedSpks || 0} sudah disetujui</span></div></article>
             <article className="stat-card stat-shadow"><div className="stat-top"><span>SPK bulan ini</span><span className="stat-icon green">↗</span></div><strong>{dealer.spksMonth || 0}</strong><div className="stat-foot"><span>{dealer.cashSpks || 0} tunai · {dealer.creditSpks || 0} kredit</span></div></article>
             <article className="stat-card stat-shadow"><div className="stat-top"><span>Siap / dalam pengiriman</span><span className="stat-icon purple">D</span></div><strong>{(dealer.readyDeliveryUnits || 0) + (dealer.inDeliveryUnits || 0)}</strong><div className="stat-foot"><span>{dealer.readyDeliveryUnits || 0} siap · {dealer.inDeliveryUnits || 0} dikirim</span></div></article>

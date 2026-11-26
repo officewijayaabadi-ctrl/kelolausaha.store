@@ -266,7 +266,10 @@ function getUserMenus(user) {
     || !superAdminRestrictedPermissions.includes(permission));
   const baseMenus = (roleMenus[user?.role] ?? []).filter(([label]) => {
     const permission = menuPermission(label);
-    return permission && permissions.includes(permission);
+    return permission && (
+      permissions.includes(permission)
+      || (label === 'Tampilan Dashboard' && ['OWNER', 'SUPER ADMIN'].includes(user?.role))
+    );
   });
   const representedPermissions = new Set((roleMenus[user?.role] ?? [])
     .map(([label]) => menuPermission(label)).filter(Boolean));
@@ -2268,8 +2271,7 @@ function App() {
   const ownerTrialCountdown = ownerTrialEnd ? getCountdown(ownerTrialEnd, countdownNow) : null;
   const activeThemeColors = getThemeColors(themeSettings);
   const receiptSettings = themeSettings.receiptSettings || defaultThemeSettings.receiptSettings;
-  const canManageTheme = ['OWNER', 'SUPER ADMIN'].includes(activeUser.role)
-    && activeUser.permissions.includes('themeManage');
+  const canManageTheme = ['OWNER', 'SUPER ADMIN'].includes(activeUser.role);
   const activeReceiptAccent = receiptAccents.find(({ id }) => id === receiptSettings.accent) || receiptAccents[0];
   const availableAccessModules = accessModules.filter(({ id }) => (
     !platformAccessPermissions.has(id)
@@ -4232,7 +4234,9 @@ function App() {
         ) : activePage === 'Dashboard' && isAuthenticated && activeUser.role !== 'PLATFORM_OWNER' ? (
           <IndustryDashboard
             businessType={businessType}
+            canManageInventory={activeUser.permissions.includes('unitManage')}
             onActivate={() => openPage('Aktivasi')}
+            onManageInventory={() => openPage('Semua Unit')}
             role={activeUser.role}
             trialCountdown={ownerTrialCountdown}
             trialEndsAt={ownerTrialEnd}

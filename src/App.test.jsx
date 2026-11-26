@@ -166,6 +166,19 @@ test('customizes and saves a company dashboard theme in the demo browser', () =>
   expect(screen.getByRole('status').textContent).toContain('Tema pratinjau tersimpan');
 });
 
+test('shows enabled dashboard theme choices to the business Owner', () => {
+  render(<App />);
+  openOwnerPreview();
+  fireEvent.change(screen.getByRole('combobox', { name: 'Pilih akun demo' }), {
+    target: { value: 'user-2' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Tampilan Dashboard' }));
+
+  const themeChoice = screen.getByRole('button', { name: /Crimson Momentum/ });
+  expect(themeChoice.disabled).toBe(false);
+  expect(screen.queryByText(/Hanya Owner dan Super Admin/)).toBeNull();
+});
+
 test('opens the receipt studio for Owner and Super Admin and saves workspace preferences', async () => {
   render(<App />);
   openOwnerPreview();
