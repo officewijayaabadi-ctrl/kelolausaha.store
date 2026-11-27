@@ -228,6 +228,7 @@ const permissionBusinessModules = {
   salesManage: 'sales_team',
   unitManage: 'vehicles',
   deliveryManage: 'delivery',
+  deliveryScheduleManage: 'delivery',
   leasingManage: 'financing',
   reportsView: 'sales_reports',
   targetManage: 'targets',

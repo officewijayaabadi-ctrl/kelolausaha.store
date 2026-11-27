@@ -1,6 +1,11 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import App, { createPosReceiptSvg, getUserMenus, getWorkspaceModulesForBusiness } from './App';
+import App, {
+  createPosReceiptSvg,
+  getDefaultRolePermissions,
+  getUserMenus,
+  getWorkspaceModulesForBusiness,
+} from './App';
 
 const { mockIo, mockSocket, mockSocketHandlers } = vi.hoisted(() => {
   const handlers = new Map();
@@ -101,6 +106,15 @@ test('opens workspace settings from the active workspace and keeps dealer invent
   expect(screen.getByRole('button', { name: 'Terapkan Tema' }).disabled).toBe(false);
   expect(getWorkspaceModulesForBusiness('dealer_motor', ['dashboard'])).toContain('vehicles');
   expect(getWorkspaceModulesForBusiness('retail', ['dashboard'])).not.toContain('vehicles');
+});
+
+test('grants SPV stock access and gives administrators delivery schedule permission', () => {
+  const spvPermissions = getDefaultRolePermissions('SPV');
+  const spvMenus = getUserMenus({ role: 'SPV', permissions: spvPermissions });
+
+  expect(spvPermissions).toContain('unitManage');
+  expect(spvMenus.some(([label]) => label === 'Stok')).toBe(true);
+  expect(getDefaultRolePermissions('ADMIN')).toContain('deliveryScheduleManage');
 });
 
 test('opens POS settings from the workspace quick menu', () => {
@@ -916,6 +930,31 @@ test('creates and prints a motorcycle purchase receipt from submitted SPK data',
   const print = vi.spyOn(window, 'print').mockImplementation(() => {});
   fireEvent.click(screen.getByRole('button', { name: 'Cetak kwitansi' }));
   await waitFor(() => expect(print).toHaveBeenCalledOnce());
+  print.mockRestore();
+});
+
+test('prints and shares SPK and issued waybill documents', () => {
+  render(<App />);
+  openOwnerPreview();
+  fireEvent.change(screen.getByRole('combobox', { name: 'Pilih akun demo' }), {
+    target: { value: 'user-2' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Semua SPK' }));
+
+  const print = vi.spyOn(window, 'print').mockImplementation(() => {});
+  fireEvent.click(screen.getByRole('button', { name: 'Cetak SPK SPK-WAM-20261120-0001' }));
+  expect(print).toHaveBeenCalledOnce();
+  expect(document.querySelector('.spk-print-document[data-printing="true"]').textContent).toContain('Siti Rahmawati');
+  expect(screen.getByRole('link', { name: 'Bagikan SPK SPK-WAM-20261120-0001 via WhatsApp' }).href)
+    .toContain('https://wa.me/6281234567890');
+
+  fireEvent.click(screen.getByRole('button', { name: 'Cetak surat jalan SJ-WAM-20261120-0001' }));
+  expect(print).toHaveBeenCalledTimes(2);
+  expect(document.querySelector('.waybill-print-document[data-printing="true"]').textContent)
+    .toContain('SJ-WAM-20261120-0001');
+  expect(screen.getByRole('link', { name: 'Bagikan surat jalan SJ-WAM-20261120-0001 via WhatsApp' }).href)
+    .toContain('https://wa.me/6281234567890');
+  window.dispatchEvent(new Event('afterprint'));
   print.mockRestore();
 });
 

@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { expect, test, vi } from 'vitest';
-import { DealerMotorWorkspace } from './DealerMotorWorkspace.jsx';
+import { DealerMotorWorkspace, DriverDeliveryWorkspace } from './DealerMotorWorkspace.jsx';
 
 test('shows reserved units and incoming/outgoing movement records', () => {
   render(
@@ -84,6 +84,8 @@ test('opens the stock intake form from the inventory menu', () => {
   fireEvent.click(screen.getByRole('button', { name: /Input stok tambahan/ }));
   expect(screen.getByRole('heading', { name: 'Tambah unit motor' })).toBeDefined();
   expect(document.querySelector('#dealer-stock-entry-form')).not.toBeNull();
+  expect(Array.from(document.querySelector('select[name="stockOrigin"]').options).map((option) => option.value))
+    .toEqual(['opening', 'incoming']);
   vi.unstubAllGlobals();
 });
 
@@ -170,4 +172,40 @@ test('hides stock intake action from users without inventory access', () => {
 
   expect(screen.queryByRole('button', { name: /Input stok tambahan/ })).toBeNull();
   expect(document.querySelector('#dealer-stock-entry-form')).toBeNull();
+});
+
+test('lets drivers print and share a waybill before claiming its delivery', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => ({
+    ok: true,
+    json: async () => ({
+      deliveries: [{
+        id: 'spk-1',
+        spkNumber: 'SPK-WAM-20261123-0001',
+        waybillNumber: 'SJ-WAM-20261123-0001',
+        waybillIssuedAt: '2026-11-23T01:00:00.000Z',
+        customerName: 'Budi Santoso',
+        customerPhone: '081234567890',
+        customerAddress: 'Jl. Merdeka',
+        brand: 'Honda',
+        model: 'Beat',
+        specification: 'CBS',
+        deliveryStatus: 'ready',
+      }],
+    }),
+  })));
+  const print = vi.spyOn(window, 'print').mockImplementation(() => {});
+  render(<DriverDeliveryWorkspace isAuthenticated notice="" workspaceName="Dealer WAM" />);
+
+  expect(await screen.findByRole('heading', {
+    name: 'SPK-WAM-20261123-0001 · Budi Santoso',
+  })).toBeDefined();
+  fireEvent.click(screen.getByRole('button', { name: 'Cetak surat jalan' }));
+  expect(print).toHaveBeenCalledOnce();
+  expect(document.querySelector('.waybill-print-document[data-printing="true"]').textContent)
+    .toContain('Budi Santoso');
+  expect(screen.getByRole('link', { name: 'Bagikan surat jalan via WhatsApp' }).href)
+    .toContain('https://wa.me/6281234567890');
+
+  print.mockRestore();
+  vi.unstubAllGlobals();
 });

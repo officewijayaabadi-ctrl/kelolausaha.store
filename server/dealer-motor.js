@@ -188,6 +188,10 @@ function shapeSpk(row) {
     status: row.status,
     date: row.createdDate,
     unitId: row.unitId,
+    branchName: row.branchName,
+    brand: row.brand,
+    model: row.model,
+    specification: row.specification,
     motor: [row.brand, row.model, row.specification].filter(Boolean).join(' '),
     type: row.specification,
     color: row.color,
@@ -195,10 +199,15 @@ function shapeSpk(row) {
     frameNumber: row.frameNumber,
     engineNumber: row.engineNumber,
     otrPrice: Number(row.otrPrice),
+    customerNik: row.customerNik,
     branchId: row.branchId,
     customerPhone: row.customerPhone,
     customerAddress: row.customerAddress,
     details: row.details,
+    waybillNumber: row.waybillNumber,
+    waybillIssuedAt: row.waybillIssuedAt,
+    deliveryScheduledAt: row.deliveryScheduledAt,
+    deliveryScheduleHistory: row.deliveryScheduleHistory || [],
     deliveryStatus: row.deliveryStatus,
     driverId: row.driverId,
     driverName: row.driverName,
@@ -575,11 +584,26 @@ export function createDealerMotorRouter({
     try {
       const result = await pool.query(
         `SELECT s.id, s.spk_number AS "spkNumber", s.customer_name AS "customerName",
+                s.customer_nik AS "customerNik",
                 s.customer_phone AS "customerPhone", s.customer_address AS "customerAddress",
                 s.sales_name AS "salesName", s.amount, s.status,
                 to_char(s.created_at, 'DD Mon YYYY') AS "createdDate",
-                s.unit_id AS "unitId", s.branch_id AS "branchId", s.details,
+                s.unit_id AS "unitId", s.branch_id AS "branchId", b.name AS "branchName", s.details,
                 s.delivery_status AS "deliveryStatus", s.driver_id AS "driverId",
+                s.waybill_number AS "waybillNumber", s.waybill_issued_at AS "waybillIssuedAt",
+                s.delivery_scheduled_at AS "deliveryScheduledAt",
+                COALESCE((
+                  SELECT jsonb_agg(jsonb_build_object(
+                    'previousScheduledAt', h.previous_scheduled_at,
+                    'scheduledAt', h.scheduled_at,
+                    'createdAt', h.created_at,
+                    'changedByName', actor.name
+                  ) ORDER BY h.created_at DESC)
+                  FROM dealer_motor_delivery_schedule_history h
+                  LEFT JOIN users actor
+                    ON actor.id = h.changed_by AND actor.company_id = h.company_id
+                  WHERE h.company_id = s.company_id AND h.spk_id = s.id
+                ), '[]'::jsonb) AS "deliveryScheduleHistory",
                 driver.name AS "driverName", s.delivery_latitude AS "deliveryLatitude",
                 s.delivery_longitude AS "deliveryLongitude", s.delivered_at AS "deliveredAt",
                 u.brand, u.model, u.specification, u.model_year AS "modelYear",
@@ -587,6 +611,7 @@ export function createDealerMotorRouter({
                 u.otr_price AS "otrPrice"
          FROM dealer_motor_spks s
          JOIN dealer_motor_units u ON u.id = s.unit_id AND u.company_id = s.company_id
+         JOIN business_branches b ON b.id = s.branch_id AND b.company_id = s.company_id
          LEFT JOIN users driver ON driver.id = s.driver_id AND driver.company_id = s.company_id
          WHERE s.company_id = $1 AND ${scopeClause}
          ORDER BY s.created_at DESC LIMIT 1000`,
@@ -804,12 +829,15 @@ export function createDealerMotorRouter({
             [unitResult.rows[0].id, req.user.company_id],
           );
           if (!updatedUnit.rowCount) throw invalid('Unit motor sudah berubah status.', 409);
-          await client.query(
+          const waybill = await client.query(
             `UPDATE dealer_motor_spks
              SET status = 'DISETUJUI', delivery_status = 'ready',
                  approved_by = $1, waybill_number = 'SJ-' || substring(spk_number FROM 5),
                  waybill_issued_at = now(), waybill_issued_by = $1, updated_at = now()
-             WHERE id = $2 AND company_id = $3`,
+             WHERE id = $2 AND company_id = $3
+             RETURNING waybill_number AS "waybillNumber",
+                       waybill_issued_at AS "waybillIssuedAt",
+                       delivery_status AS "deliveryStatus"`,
             [req.user.id, req.params.id, req.user.company_id],
           );
           await client.query(
@@ -821,10 +849,57 @@ export function createDealerMotorRouter({
           return {
             id: spkResult.rows[0].id,
             spkNumber: spkResult.rows[0].spkNumber,
-            waybillNumber: spkResult.rows[0].spkNumber.replace(/^SPK-/, 'SJ-'),
+            waybillNumber: waybill.rows[0].waybillNumber,
+            waybillIssuedAt: waybill.rows[0].waybillIssuedAt,
             status: 'DISETUJUI',
-            deliveryStatus: 'ready',
+            deliveryStatus: waybill.rows[0].deliveryStatus,
           };
+        });
+        res.json({ spk: result });
+      } catch (error) {
+        if (error.status) return res.status(error.status).json({ message: error.message });
+        next(error);
+      }
+    });
+
+  router.patch('/spks/:id/delivery-schedule', authenticate, requireTenant, requireActiveTenant,
+    requirePermission('deliveryScheduleManage'), async (req, res, next) => {
+      if (!uuidPattern.test(req.params.id)) return res.status(400).json({ message: 'SPK tidak valid.' });
+      const scheduledAt = typeof req.body?.scheduledAt === 'string'
+        ? new Date(req.body.scheduledAt) : null;
+      if (!scheduledAt || Number.isNaN(scheduledAt.getTime()) || scheduledAt.getTime() <= Date.now()) {
+        return res.status(400).json({ message: 'Jadwal pengiriman harus berupa tanggal dan waktu mendatang yang valid.' });
+      }
+      try {
+        const result = await withTransaction(pool, async (client) => {
+          const current = await client.query(
+            `SELECT delivery_scheduled_at AS "previousScheduledAt"
+             FROM dealer_motor_spks
+             WHERE id = $1 AND company_id = $2 AND status = 'DISETUJUI'
+               AND delivery_status = 'ready' AND driver_id IS NULL
+               AND waybill_number IS NOT NULL
+             FOR UPDATE`,
+            [req.params.id, req.user.company_id],
+          );
+          if (!current.rowCount) {
+            throw invalid('Jadwal hanya dapat diubah saat pengiriman berstatus pending dan surat jalan tersedia.', 409);
+          }
+          const updated = await client.query(
+            `UPDATE dealer_motor_spks
+             SET delivery_scheduled_at = $1, updated_at = now()
+             WHERE id = $2 AND company_id = $3
+             RETURNING id, spk_number AS "spkNumber",
+                       delivery_scheduled_at AS "deliveryScheduledAt"`,
+            [scheduledAt, req.params.id, req.user.company_id],
+          );
+          await client.query(
+            `INSERT INTO dealer_motor_delivery_schedule_history
+               (company_id, spk_id, changed_by, previous_scheduled_at, scheduled_at)
+             VALUES ($1, $2, $3, $4, $5)`,
+            [req.user.company_id, req.params.id, req.user.id,
+              current.rows[0].previousScheduledAt, scheduledAt],
+          );
+          return updated.rows[0];
         });
         res.json({ spk: result });
       } catch (error) {
@@ -844,12 +919,16 @@ export function createDealerMotorRouter({
                   s.delivery_status AS "deliveryStatus", s.driver_id AS "driverId",
                   s.waybill_number AS "waybillNumber",
                   s.waybill_issued_at AS "waybillIssuedAt",
+                  s.delivery_scheduled_at AS "deliveryScheduledAt",
                   s.created_at AS "createdAt", u.brand, u.model, u.specification,
                   u.model_year AS "modelYear", u.color,
-                  u.frame_number AS "frameNumber", u.engine_number AS "engineNumber"
+                  u.frame_number AS "frameNumber", u.engine_number AS "engineNumber",
+                  driver.name AS "driverName"
            FROM dealer_motor_spks s
            JOIN dealer_motor_units u ON u.id = s.unit_id AND u.company_id = s.company_id
-           WHERE s.company_id = $1 AND s.delivery_status IN ('ready', 'in_delivery')
+           LEFT JOIN users driver ON driver.id = s.driver_id AND driver.company_id = s.company_id
+           WHERE s.company_id = $1 AND s.waybill_number IS NOT NULL
+             AND s.delivery_status IN ('ready', 'in_delivery')
              AND (s.driver_id IS NULL OR s.driver_id = $2)
              AND ($3::boolean OR s.branch_id = $4)
            ORDER BY s.created_at`,
@@ -870,7 +949,8 @@ export function createDealerMotorRouter({
         const delivery = await withTransaction(pool, async (client) => {
           const result = await client.query(
             `SELECT id, unit_id FROM dealer_motor_spks
-             WHERE id = $1 AND company_id = $2 AND delivery_status = 'ready' AND driver_id IS NULL
+             WHERE id = $1 AND company_id = $2 AND delivery_status = 'ready'
+               AND waybill_number IS NOT NULL AND driver_id IS NULL
                AND ($3::boolean OR branch_id = $4)
              FOR UPDATE`,
             [req.params.id, req.user.company_id, canViewAllBranches, req.user.branch_id],

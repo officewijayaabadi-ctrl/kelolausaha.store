@@ -1,4 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
+import { getWaybillWhatsAppUrl, WaybillPrintDocument } from './DealerDocuments.jsx';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const emptyUnit = () => ({
@@ -325,13 +327,20 @@ export function DealerMotorWorkspace({
   </section>;
 }
 
-export function DriverDeliveryWorkspace({ isAuthenticated, notice }) {
+export function DriverDeliveryWorkspace({ isAuthenticated, notice, workspaceName }) {
   const [deliveries, setDeliveries] = useState([]);
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState('');
   const [proofFiles, setProofFiles] = useState({});
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [printingWaybillId, setPrintingWaybillId] = useState('');
+
+  useEffect(() => {
+    const clearPrintingWaybill = () => setPrintingWaybillId('');
+    window.addEventListener('afterprint', clearPrintingWaybill);
+    return () => window.removeEventListener('afterprint', clearPrintingWaybill);
+  }, []);
 
   const load = async () => {
     if (!isAuthenticated) return;
@@ -368,6 +377,11 @@ export function DriverDeliveryWorkspace({ isAuthenticated, notice }) {
     } finally {
       setBusyId('');
     }
+  };
+
+  const printWaybill = (delivery) => {
+    flushSync(() => setPrintingWaybillId(delivery.id));
+    window.print();
   };
 
   const submitProof = async (event, delivery) => {
@@ -422,6 +436,18 @@ export function DriverDeliveryWorkspace({ isAuthenticated, notice }) {
           <strong>{delivery.deliveryStatus === 'ready' ? 'Tersedia untuk diambil' : 'Tugas Anda'}</strong></div>
         <p>{delivery.customerPhone} · {delivery.customerAddress}</p>
         <p><strong>Surat Jalan:</strong> {delivery.waybillNumber || '—'} · <strong>SPK:</strong> {delivery.spkNumber}</p>
+        {delivery.deliveryScheduledAt && <p><strong>Jadwal pengiriman:</strong> {dateTime(delivery.deliveryScheduledAt)}</p>}
+        <div className="delivery-document-actions">
+          <button className="button button-quiet" onClick={() => printWaybill(delivery)} type="button">Cetak surat jalan</button>
+          {getWaybillWhatsAppUrl(delivery, workspaceName)
+            ? <a className="button button-primary" href={getWaybillWhatsAppUrl(delivery, workspaceName)} rel="noreferrer" target="_blank">Bagikan surat jalan via WhatsApp</a>
+            : <span className="document-share-unavailable">WhatsApp pelanggan belum tersedia</span>}
+        </div>
+        <WaybillPrintDocument
+          delivery={delivery}
+          printing={printingWaybillId === delivery.id}
+          workspaceName={workspaceName}
+        />
         {delivery.deliveryStatus === 'ready'
           ? <button className="button button-primary" disabled={busyId === delivery.id} onClick={() => claim(delivery)} type="button">Ambil tugas sendiri <span>→</span></button>
           : <form onSubmit={(event) => submitProof(event, delivery)}>

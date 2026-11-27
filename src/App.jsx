@@ -28,6 +28,12 @@ import IndustryDashboard from './IndustryDashboard.jsx';
 import { AttendanceWorkspace, BranchManagement } from './WorkspaceOperations.jsx';
 import { DealerMotorWorkspace, DriverDeliveryWorkspace } from './DealerMotorWorkspace.jsx';
 import { BusinessProfileSettings } from './BusinessProfileSettings.jsx';
+import {
+  getSpkWhatsAppUrl,
+  getWaybillWhatsAppUrl,
+  SpkPrintDocument,
+  WaybillPrintDocument,
+} from './DealerDocuments.jsx';
 
 const dealerName = 'Dealer Motor Wijaya Abadi Mulia';
 
@@ -145,6 +151,7 @@ const roleMenus = {
   SPV: [
     ['Dashboard', '▦'],
     ['Absensi', '◷'],
+    ['Stok', '⌂'],
   ],
   'KEPALA TOKO': [
     ['Dashboard', '▦'],
@@ -163,6 +170,7 @@ const accessModules = [
   { id: 'salesManage', label: 'Data sales', group: 'Data dealer' },
   { id: 'unitManage', label: 'Unit dealer & motor', group: 'Data dealer' },
   { id: 'deliveryManage', label: 'Pengiriman motor', group: 'Operasional' },
+  { id: 'deliveryScheduleManage', label: 'Jadwal pengiriman', group: 'Operasional' },
   { id: 'leasingManage', label: 'Data leasing & promo', group: 'Data dealer' },
   { id: 'reportsView', label: 'Laporan & performa', group: 'Laporan' },
   { id: 'targetManage', label: 'Target penjualan', group: 'Laporan' },
@@ -185,18 +193,20 @@ const accessModules = [
 ];
 
 const rolePermissions = {
-  'SUPER ADMIN': ['dashboard', 'spkCreate', 'spkViewAll', 'spkViewOwn', 'spkVerify', 'spkApprove', 'customerManage', 'salesManage', 'unitManage', 'leasingManage', 'posAccess', 'priceManage', 'transactionsView', 'receiptsView', 'userManage', 'accessManage', 'themeManage', 'attendanceView', 'branchManage'],
-  OWNER: ['dashboard', 'spkCreate', 'spkViewAll', 'spkViewOwn', 'spkVerify', 'spkApprove', 'customerManage', 'salesManage', 'unitManage', 'leasingManage', 'reportsView', 'targetManage', 'posAccess', 'priceManage', 'transactionsView', 'receiptsView', 'userManage', 'accessManage', 'themeManage', 'activationManage', 'financeView', 'financeManage', 'attendanceView', 'attendanceManage', 'branchManage'],
+  'SUPER ADMIN': ['dashboard', 'spkCreate', 'spkViewAll', 'spkViewOwn', 'spkVerify', 'spkApprove', 'customerManage', 'salesManage', 'unitManage', 'leasingManage', 'posAccess', 'priceManage', 'transactionsView', 'receiptsView', 'userManage', 'accessManage', 'themeManage', 'attendanceView', 'branchManage', 'deliveryScheduleManage'],
+  OWNER: ['dashboard', 'spkCreate', 'spkViewAll', 'spkViewOwn', 'spkVerify', 'spkApprove', 'customerManage', 'salesManage', 'unitManage', 'leasingManage', 'reportsView', 'targetManage', 'posAccess', 'priceManage', 'transactionsView', 'receiptsView', 'userManage', 'accessManage', 'themeManage', 'activationManage', 'financeView', 'financeManage', 'attendanceView', 'attendanceManage', 'branchManage', 'deliveryScheduleManage'],
   HRD: ['dashboard', 'userManage', 'attendanceView', 'attendanceManage', 'branchManage'],
   SVP: ['dashboard', 'spkViewAll', 'unitManage', 'salesManage', 'spkApprove', 'reportsView', 'attendanceView'],
-  SPV: ['dashboard', 'attendanceView'],
+  SPV: ['dashboard', 'attendanceView', 'unitManage'],
   'KEPALA TOKO': ['dashboard', 'attendanceView'],
-  ADMIN: ['dashboard', 'spkCreate', 'spkViewAll', 'spkVerify', 'customerManage', 'salesManage', 'unitManage', 'leasingManage', 'posAccess', 'priceManage', 'transactionsView', 'receiptsView', 'attendanceView'],
+  ADMIN: ['dashboard', 'spkCreate', 'spkViewAll', 'spkVerify', 'customerManage', 'salesManage', 'unitManage', 'leasingManage', 'posAccess', 'priceManage', 'transactionsView', 'receiptsView', 'attendanceView', 'deliveryScheduleManage'],
   SALES: ['dashboard', 'spkCreate', 'spkViewOwn', 'customerManage', 'attendanceView'],
   KASIR: ['dashboard', 'posAccess', 'priceManage', 'transactionsView', 'receiptsView', 'attendanceView'],
   DRIVER: ['dashboard', 'deliveryManage', 'attendanceView'],
   PLATFORM_OWNER: ['platformBusinesses', 'platformBilling', 'supportManage'],
 };
+
+export const getDefaultRolePermissions = (role) => [...(rolePermissions[role] || [])];
 
 const superAdminRestrictedPermissions = [
   'reportsView', 'targetManage', 'financeView', 'financeManage',
@@ -318,7 +328,7 @@ const initialUsers = [
   { id: 'user-4', name: 'Siti Aminah', email: 'siti@wam.co.id', role: 'ADMIN', active: true },
   { id: 'user-5', name: 'Rizky Pratama', email: 'rizky@wam.co.id', role: 'SALES', active: true },
   { id: 'user-6', name: 'Budi Driver', email: 'driver@wam.co.id', role: 'DRIVER', active: true },
-].map((user) => ({ ...user, permissions: [...rolePermissions[user.role]] }));
+].map((user) => ({ ...user, permissions: getDefaultRolePermissions(user.role) }));
 initialUsers.push({
   id: 'platform-owner-demo',
   name: 'Owner KelolaUsaha.store',
@@ -331,7 +341,29 @@ initialUsers.push({
 const initialSpks = [
   { id: 'SPK-WAM-20261120-0003', customer: 'Nadia Putri', motor: 'Honda Beat Deluxe', sales: 'Rizky Pratama', amount: 19800000, status: 'APPROVAL SVP', date: '20 Nov 2026' },
   { id: 'SPK-WAM-20261120-0002', customer: 'Budi Santoso', motor: 'Honda Vario 160', sales: 'Dewi Anggraini', amount: 28750000, status: 'VERIFIKASI ADMIN', date: '20 Nov 2026' },
-  { id: 'SPK-WAM-20261120-0001', customer: 'Siti Rahmawati', motor: 'Honda Scoopy', sales: 'Andi Saputra', amount: 22400000, status: 'SELESAI', date: '20 Nov 2026' },
+  {
+    id: 'SPK-WAM-20261120-0001',
+    customer: 'Siti Rahmawati',
+    customerPhone: '081234567890',
+    customerAddress: 'Jl. Merdeka No. 10, Bojonegoro',
+    customerNik: '3578123456789012',
+    motor: 'Honda Scoopy',
+    brand: 'Honda',
+    model: 'Honda Scoopy',
+    specification: '110 cc',
+    color: 'Hitam',
+    year: 2026,
+    frameNumber: 'MH1DEMO12345678901',
+    engineNumber: 'DEMO1234567',
+    sales: 'Andi Saputra',
+    amount: 22400000,
+    otrPrice: 22400000,
+    status: 'DISETUJUI',
+    deliveryStatus: 'ready',
+    waybillNumber: 'SJ-WAM-20261120-0001',
+    waybillIssuedAt: '2026-11-20T08:30:00.000Z',
+    date: '20 Nov 2026',
+  },
   { id: 'SPK-WAM-20261119-0008', customer: 'Fajar Maulana', motor: 'Honda PCX 160', sales: 'Rizky Pratama', amount: 33750000, status: 'SUBMITTED', date: '19 Nov 2026' },
 ];
 
@@ -585,6 +617,13 @@ function normalizeWhatsAppNumber(value) {
   if (digits.startsWith('0')) return `62${digits.slice(1)}`;
   if (digits.startsWith('8')) return `62${digits}`;
   return digits;
+}
+
+function dateTimeLocalInput(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 }
 
 function escapeSvgText(value) {
@@ -1174,6 +1213,10 @@ function App() {
   const [printingReceipt, setPrintingReceipt] = useState('');
   const [motorReceipts, setMotorReceipts] = useState([]);
   const [printingMotorReceipt, setPrintingMotorReceipt] = useState('');
+  const [printingSpk, setPrintingSpk] = useState('');
+  const [printingWaybill, setPrintingWaybill] = useState('');
+  const [deliveryScheduleDrafts, setDeliveryScheduleDrafts] = useState({});
+  const [scheduleSavingId, setScheduleSavingId] = useState('');
   const [restaurantOrders, setRestaurantOrders] = useState([]);
   const [restaurantOrderWorkspaceKey, setRestaurantOrderWorkspaceKey] = useState('KelolaUsaha.store');
   const [restaurantQrCodes, setRestaurantQrCodes] = useState([]);
@@ -1434,6 +1477,8 @@ function App() {
     const clearPrintingReceipt = () => {
       setPrintingReceipt('');
       setPrintingMotorReceipt('');
+      setPrintingSpk('');
+      setPrintingWaybill('');
     };
     window.addEventListener('afterprint', clearPrintingReceipt);
     return () => window.removeEventListener('afterprint', clearPrintingReceipt);
@@ -1813,6 +1858,60 @@ function App() {
     window.print();
   };
 
+  const printSpkDocument = (spk) => {
+    flushSync(() => setPrintingSpk(spk.id));
+    window.print();
+  };
+
+  const printWaybillDocument = (spk) => {
+    flushSync(() => setPrintingWaybill(spk.id));
+    window.print();
+  };
+
+  const saveDeliverySchedule = async (spk) => {
+    const localDateTime = deliveryScheduleDrafts[spk.id] || dateTimeLocalInput(spk.deliveryScheduledAt);
+    const scheduledAt = new Date(localDateTime);
+    if (!localDateTime || Number.isNaN(scheduledAt.getTime()) || scheduledAt.getTime() <= Date.now()) {
+      setNotice('Pilih jadwal pengiriman pada waktu mendatang.');
+      return;
+    }
+
+    setScheduleSavingId(spk.id);
+    try {
+      const response = await fetch(`/api/dealer-motor/spks/${spk.id}/delivery-schedule`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scheduledAt: scheduledAt.toISOString() }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message || 'Jadwal pengiriman tidak dapat disimpan.');
+      if (!result.spk?.deliveryScheduledAt) throw new Error('Jadwal pengiriman dari server tidak valid.');
+      setSpks((current) => current.map((item) => (
+        item.id === spk.id
+          ? {
+            ...item,
+            deliveryScheduledAt: result.spk.deliveryScheduledAt,
+            deliveryScheduleHistory: [
+              {
+                previousScheduledAt: item.deliveryScheduledAt || null,
+                scheduledAt: result.spk.deliveryScheduledAt,
+                createdAt: new Date().toISOString(),
+                changedByName: activeUser.name,
+              },
+              ...(item.deliveryScheduleHistory || []),
+            ],
+          }
+          : item
+      )));
+      setDeliveryScheduleDrafts((current) => ({ ...current, [spk.id]: '' }));
+      setNotice(`Jadwal pengiriman ${spk.spkNumber || spk.id} berhasil diperbarui.`);
+    } catch (error) {
+      setNotice(error.message);
+    } finally {
+      setScheduleSavingId('');
+    }
+  };
+
   const beginNewSpk = () => {
     setForm({
       date: getToday(),
@@ -1866,6 +1965,31 @@ function App() {
       motor: [form.motor, form.type].filter(Boolean).join(' ') || 'Motor belum dipilih',
       sales: activeUser.role === 'SALES' ? activeUser.name : form.sales || 'Belum ditentukan',
       amount: selectedUnit ? Number(selectedUnit.otrPrice) : Number(form.otr) || 0,
+      otrPrice: selectedUnit ? Number(selectedUnit.otrPrice) : Number(form.otr) || 0,
+      customerNik: form.nik,
+      customerPhone: form.whatsapp,
+      customerAddress: form.address,
+      brand: selectedUnit?.brand || '',
+      model: selectedUnit?.model || form.motor,
+      specification: selectedUnit?.specification || form.type,
+      color: selectedUnit?.color || form.color,
+      year: selectedUnit?.modelYear || form.year,
+      frameNumber: selectedUnit?.frameNumber || form.frameNumber,
+      engineNumber: selectedUnit?.engineNumber || form.engineNumber,
+      details: {
+        date: form.date,
+        paymentType,
+        leasing: form.leasing,
+        downPayment: form.dp,
+        tenor: form.tenor,
+        installment: form.installment,
+        promo: form.promo,
+        discount: form.discount,
+        receiptAmount: form.receiptAmount,
+        receiptCity: form.receiptCity,
+        stnkName: form.stnkName,
+        receiptNote: form.receiptNote,
+      },
       status,
       date: dateLabel,
     };
@@ -1983,7 +2107,13 @@ function App() {
         const changedStatus = result.spk?.status;
         if (!changedStatus) throw new Error('Status SPK dari server tidak valid.');
         setSpks((current) => current.map((item) => (
-          item.id === spk.id ? { ...item, status: changedStatus, deliveryStatus: result.spk.deliveryStatus ?? item.deliveryStatus } : item
+          item.id === spk.id ? {
+            ...item,
+            status: changedStatus,
+            deliveryStatus: result.spk.deliveryStatus ?? item.deliveryStatus,
+            waybillNumber: result.spk.waybillNumber ?? item.waybillNumber,
+            waybillIssuedAt: result.spk.waybillIssuedAt ?? item.waybillIssuedAt,
+          } : item
         )));
         setNotice(`${spk.spkNumber || spk.id} berhasil ${actionLabel.toLowerCase()}.`);
         return;
@@ -1994,7 +2124,15 @@ function App() {
     }
     setSpks((current) => current.map((item) => (
       item.id === spk.id && allowedStatuses.includes(item.status)
-        ? { ...item, status: nextStatus }
+        ? nextStatus === 'DISETUJUI'
+          ? {
+            ...item,
+            status: nextStatus,
+            deliveryStatus: 'ready',
+            waybillNumber: (item.spkNumber || item.id).replace(/^SPK-/, 'SJ-'),
+            waybillIssuedAt: new Date().toISOString(),
+          }
+          : { ...item, status: nextStatus }
         : item
     )));
     setNotice(`${spk.spkNumber || spk.id} berhasil ${actionLabel.toLowerCase()}.`);
@@ -2012,7 +2150,7 @@ function App() {
     spk,
     'spkApprove',
     ['APPROVAL SVP'],
-    'SELESAI',
+    'DISETUJUI',
     'disetujui',
   );
 
@@ -4416,7 +4554,11 @@ function App() {
             units={dealerMotorUnits}
           />
         ) : activePage === 'Pengiriman' ? (
-          <DriverDeliveryWorkspace isAuthenticated={isAuthenticated} notice={notice} />
+          <DriverDeliveryWorkspace
+            isAuthenticated={isAuthenticated}
+            notice={notice}
+            workspaceName={workspaceName}
+          />
         ) : activePage === 'Input SPK' ? (
           <section className="content form-page">
             <div className="page-heading form-heading">
@@ -4715,16 +4857,74 @@ function App() {
             {notice && <div className="notice" role="status">{notice}</div>}
             <section className="table-card full-table">
               <div className="table-heading"><div><h2>{heading === 'Semua SPK' || heading === 'SPK' ? 'Daftar SPK' : `Data ${heading}`}</h2><p>{visibleSpks.length} pengajuan penjualan terdaftar</p></div><div className="table-tools"><input aria-label="Cari data" placeholder="Cari customer atau nomor SPK..." /><button className="filter-button" type="button">Semua status <span>⌄</span></button></div></div>
-              <div className="table-scroll"><table><thead><tr><th>NOMOR SPK</th><th>CUSTOMER</th><th>KENDARAAN</th><th>SALES</th><th>NILAI OTR</th><th>STATUS</th><th /></tr></thead><tbody>
+              <div className="table-scroll"><table><thead><tr><th>NOMOR SPK</th><th>CUSTOMER</th><th>KENDARAAN</th><th>SALES</th><th>NILAI OTR</th><th>STATUS</th><th>DOKUMEN / AKSI</th></tr></thead><tbody>
                 {visibleSpks.map((item) => <tr key={item.id}><td><strong className="spk-id">{item.spkNumber || item.id}</strong><small>{item.date || item.createdDate}</small></td><td><strong>{item.customer}</strong><small>Customer</small></td><td>{item.motor}</td><td>{item.sales}</td><td className="amount">{rupiah(item.amount)}</td><td><span className={`status-badge ${statusClass(item.status)}`}><span />{item.status}</span></td><td className="spk-actions">
+                  <div className="spk-document-actions">
+                    <button aria-label={`Cetak SPK ${item.spkNumber || item.id}`} className="button button-quiet" onClick={() => printSpkDocument(item)} type="button">Cetak SPK</button>
+                    {getSpkWhatsAppUrl(item, workspaceName)
+                      ? <a aria-label={`Bagikan SPK ${item.spkNumber || item.id} via WhatsApp`} className="button button-quiet" href={getSpkWhatsAppUrl(item, workspaceName)} rel="noreferrer" target="_blank">Bagikan SPK via WhatsApp</a>
+                      : <span className="document-share-unavailable">WhatsApp pelanggan belum tersedia</span>}
+                    {item.waybillNumber && <>
+                      <button aria-label={`Cetak surat jalan ${item.waybillNumber}`} className="button button-quiet" onClick={() => printWaybillDocument(item)} type="button">Cetak surat jalan</button>
+                      {getWaybillWhatsAppUrl(item, workspaceName)
+                        ? <a aria-label={`Bagikan surat jalan ${item.waybillNumber} via WhatsApp`} className="button button-quiet" href={getWaybillWhatsAppUrl(item, workspaceName)} rel="noreferrer" target="_blank">Bagikan surat jalan via WhatsApp</a>
+                        : <span className="document-share-unavailable">WhatsApp pelanggan belum tersedia</span>}
+                    </>}
+                  </div>
                   {activeUser.permissions.includes('spkVerify') && ['SUBMITTED', 'VERIFIKASI ADMIN'].includes(item.status) && <button aria-label={`Verifikasi SPK ${item.spkNumber || item.id}`} className="button button-quiet" onClick={() => verifySpk(item)} type="button">Verifikasi SPK</button>}
                   {activeUser.permissions.includes('spkVerify') && item.status === 'SUBMITTED' && <button aria-label={`Tolak SPK ${item.spkNumber || item.id}`} className="button button-quiet" onClick={() => rejectSpk(item)} type="button">Tolak SPK</button>}
                   {activeUser.permissions.includes('spkApprove') && item.status === 'APPROVAL SVP' && <button aria-label={`Setujui SPK ${item.spkNumber || item.id}`} className="button button-primary" onClick={() => approveSpk(item)} type="button">Setujui SPK</button>}
                   {activeUser.permissions.includes('spkApprove') && item.status === 'APPROVAL SVP' && <button aria-label={`Tolak SPK ${item.spkNumber || item.id}`} className="button button-quiet" onClick={() => rejectSpk(item)} type="button">Tolak SPK</button>}
+                  {activeUser.permissions.includes('deliveryScheduleManage')
+                    && item.deliveryStatus === 'ready'
+                    && item.waybillNumber
+                    && <form className="delivery-schedule-form" onSubmit={(event) => {
+                      event.preventDefault();
+                      void saveDeliverySchedule(item);
+                    }}>
+                      <label className="field">
+                        <span>{item.deliveryScheduledAt ? 'Jadwal pengiriman' : 'Atur jadwal pengiriman'}</span>
+                        <input
+                          aria-label={`Jadwal pengiriman ${item.spkNumber || item.id}`}
+                          min={dateTimeLocalInput(Date.now() + 60000)}
+                          onChange={(event) => setDeliveryScheduleDrafts((current) => ({
+                            ...current,
+                            [item.id]: event.target.value,
+                          }))}
+                          required
+                          type="datetime-local"
+                          value={deliveryScheduleDrafts[item.id] ?? dateTimeLocalInput(item.deliveryScheduledAt)}
+                        />
+                      </label>
+                      <button className="button button-quiet" disabled={scheduleSavingId === item.id} type="submit">
+                        {scheduleSavingId === item.id ? 'Menyimpan…' : 'Simpan jadwal'}
+                      </button>
+                    </form>}
+                  {item.deliveryScheduleHistory?.length > 0 && <details className="delivery-schedule-history">
+                    <summary>Riwayat jadwal ({item.deliveryScheduleHistory.length})</summary>
+                    <ol>{item.deliveryScheduleHistory.map((entry, index) => <li key={`${entry.createdAt}-${index}`}>
+                      <span>{entry.previousScheduledAt
+                        ? `${new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(entry.previousScheduledAt))} → `
+                        : 'Jadwal awal → '}
+                        {new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(entry.scheduledAt))}
+                      </span>
+                      <small>{entry.changedByName || 'Pengelola'} · {new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(entry.createdAt))}</small>
+                    </li>)}</ol>
+                  </details>}
                   {!['SUBMITTED', 'VERIFIKASI ADMIN', 'APPROVAL SVP'].includes(item.status)
                     || (item.status === 'SUBMITTED' && !activeUser.permissions.includes('spkVerify'))
                     || (item.status === 'APPROVAL SVP' && !activeUser.permissions.includes('spkApprove'))
                     ? <span aria-label="Tidak ada tindakan SPK">—</span> : null}
+                  <SpkPrintDocument
+                    printing={printingSpk === item.id}
+                    spk={item}
+                    workspaceName={workspaceName}
+                  />
+                  {item.waybillNumber && <WaybillPrintDocument
+                    delivery={item}
+                    printing={printingWaybill === item.id}
+                    workspaceName={workspaceName}
+                  />}
                 </td></tr>)}
                 {visibleSpks.length === 0 && <tr><td colSpan="7">Tidak ada pengajuan yang menunggu approval.</td></tr>}
               </tbody></table></div>
