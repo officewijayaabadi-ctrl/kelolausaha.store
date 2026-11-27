@@ -82,6 +82,15 @@ test('opens workspace settings from the active workspace and keeps dealer invent
   fireEvent.click(screen.getByRole('button', { name: 'Buka pengaturan workspace' }));
 
   expect(screen.getByRole('heading', { name: 'Struktur Workspace' })).toBeDefined();
+  const vehiclesModule = screen.getByRole('checkbox', { name: /Data motor & stok unit/ });
+  expect(vehiclesModule.checked).toBe(true);
+  expect(vehiclesModule.disabled).toBe(false);
+  fireEvent.click(vehiclesModule);
+  expect(vehiclesModule.checked).toBe(true);
+  expect(screen.getByRole('status').textContent).toContain('aktif dan wajib');
+  fireEvent.click(screen.getByRole('button', { name: 'Pengaturan tema usaha' }));
+  expect(screen.getByRole('heading', { name: 'Tampilan Dashboard' })).toBeDefined();
+  expect(screen.getByRole('button', { name: /Crimson Momentum/ }).disabled).toBe(false);
   expect(getWorkspaceModulesForBusiness('dealer_motor', ['dashboard'])).toContain('vehicles');
   expect(getWorkspaceModulesForBusiness('retail', ['dashboard'])).not.toContain('vehicles');
 });

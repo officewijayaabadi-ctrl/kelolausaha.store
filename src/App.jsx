@@ -4285,6 +4285,7 @@ function App() {
           <section className="content">
             <div className="page-heading">
               <div><div className="eyebrow">WORKSPACE <span>/</span> PENGATURAN</div><h1>Struktur Workspace</h1><p>Aktifkan hanya modul yang dipakai oleh {businessTypes[businessType]?.label || 'usaha'} Anda. Pengaturan ini berlaku untuk seluruh pengguna workspace.</p></div>
+              <button className="button button-secondary" onClick={() => openPage('Tampilan Dashboard')} type="button">Pengaturan tema usaha</button>
             </div>
             {notice && <div className="notice" role="status">{notice}</div>}
             <section className="table-card workspace-structure-card">
@@ -4297,16 +4298,25 @@ function App() {
                   return <label className={`workspace-module-option ${checked ? 'is-selected' : ''}`} key={id}>
                     <input
                       checked={checked}
-                      disabled={required}
-                      onChange={() => setWorkspaceModuleDraft((current) => (
-                        current.includes(id) ? current.filter((moduleId) => moduleId !== id) : [...current, id]
-                      ))}
+                      disabled={id === 'dashboard'}
+                      onChange={() => {
+                        if (id === 'vehicles' && required) {
+                          setWorkspaceModuleDraft((current) => (
+                            current.includes(id) ? current : [...current, id]
+                          ));
+                          setNotice('Data motor & stok unit aktif dan wajib untuk usaha dealer.');
+                          return;
+                        }
+                        setWorkspaceModuleDraft((current) => (
+                          current.includes(id) ? current.filter((moduleId) => moduleId !== id) : [...current, id]
+                        ));
+                      }}
                       type="checkbox"
                     />
                     <span><strong>{label}</strong><small>{id === 'dashboard'
                       ? 'Wajib aktif untuk ringkasan workspace.'
                       : required
-                        ? 'Wajib aktif agar stok unit dan penerimaan kendaraan tampil.'
+                        ? 'Aktif dan wajib agar stok unit serta penerimaan kendaraan tampil.'
                         : 'Tampilkan atau sembunyikan modul ini di navigasi tim.'}</small></span>
                   </label>;
                 })}
