@@ -174,6 +174,55 @@ test('hides stock intake action from users without inventory access', () => {
   expect(document.querySelector('#dealer-stock-entry-form')).toBeNull();
 });
 
+test('prioritizes SPK units in PDI while leaving other stock available for inspection', async () => {
+  const onUpdatePdi = vi.fn();
+  const { container } = render(
+    <DealerMotorWorkspace
+      branches={[]}
+      canInspectPdi
+      canManage={false}
+      movements={[]}
+      notice=""
+      onCreate={vi.fn()}
+      onUpdatePdi={onUpdatePdi}
+      pdiOnly
+      units={[
+        {
+          id: 'other-stock',
+          stockStatus: 'available',
+          pdiStatus: 'pending',
+          stockEntryDate: '2026-11-23',
+          brand: 'Honda',
+          model: 'Beat',
+          specification: 'CBS',
+          color: 'Hitam',
+        },
+        {
+          id: 'spk-stock',
+          stockStatus: 'reserved',
+          pdiStatus: 'pending',
+          spkNumber: 'SPK-WAM-20261123-0001',
+          stockEntryDate: '2026-11-22',
+          brand: 'Honda',
+          model: 'Vario',
+          specification: 'CBS',
+          color: 'Merah',
+        },
+      ]}
+    />,
+  );
+  const rows = [...container.querySelectorAll('tbody tr')];
+
+  expect(screen.getByRole('heading', { name: 'Inspeksi unit (PDI)' })).toBeDefined();
+  expect(rows[0].textContent).toContain('SPK-WAM-20261123-0001');
+  expect(rows[0].textContent).toContain('Vario');
+  expect(rows[1].textContent).toContain('Beat');
+  expect(screen.getAllByRole('button', { name: 'Mulai inspeksi' })).toHaveLength(2);
+  expect(screen.getByText('Unit yang sudah masuk SPK diprioritaskan; Anda tetap dapat memilih unit stok lain untuk diperiksa.')).toBeDefined();
+  fireEvent.click(screen.getAllByRole('button', { name: 'Mulai inspeksi' })[0]);
+  await waitFor(() => expect(onUpdatePdi).toHaveBeenCalledWith('spk-stock', 'start', ''));
+});
+
 test('lets drivers print and share a waybill before claiming its delivery', async () => {
   vi.stubGlobal('fetch', vi.fn(async () => ({
     ok: true,

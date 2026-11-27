@@ -1,0 +1,44 @@
+.dealer-sales-page { display: grid; align-content: start; gap: 20px; }
+.dealer-period-field { display: grid; min-width: 190px; gap: 7px; color: #78838d; font-size: 11px; font-weight: 600; }
+.dealer-period-field input, .dealer-target-fields input, .dealer-target-fields select, .dealer-report-filters input, .dealer-report-filters select { min-height: 40px; padding: 0 11px; border: 1px solid #e8edef; border-radius: 8px; color: #303943; background: #fff; }
+.dealer-target-form { padding: 20px; border: 1px solid #e9edef; border-radius: 12px; background: #fff; }
+.dealer-sales-section-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; }
+.dealer-sales-section-heading h2, .dealer-sales-section-heading p { margin: 0; }
+.dealer-sales-section-heading h2 { color: #313b45; font-size: 15px; }
+.dealer-sales-section-heading p { margin-top: 5px; color: #85909a; font-size: 11px; }
+.dealer-target-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); align-items: end; gap: 13px; }
+.dealer-target-fields .field, .dealer-report-filters .field { display: grid; gap: 7px; color: #78838d; font-size: 11px; font-weight: 600; }
+.dealer-target-fields .button { min-height: 40px; justify-self: start; }
+.dealer-targets-card { min-width: 0; }
+.dealer-empty-state { margin: 0; padding: 24px; color: #78838d; font-size: 12px; text-align: center; }
+.dealer-report-filters { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; padding: 16px; border: 1px solid #e9edef; border-radius: 12px; background: #fff; }
+.dealer-report-filters .field { min-width: 180px; }
+.dealer-report-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.dealer-report-stats .stat-card { min-width: 0; }
+.dealer-report-stats .stat-card > strong { overflow-wrap: anywhere; font-size: clamp(18px, 2vw, 25px); }
+.dealer-report-breakdowns { display: grid; gap: 18px; }
+.dealer-report-breakdowns .table-card { min-width: 0; }
+.dealer-report-breakdowns .table-scroll { overflow-x: auto; }
+.dealer-report-breakdowns table { min-width: 650px; }
+.dealer-report-breakdowns tr small { display: block; margin-top: 4px; color: #8a939d; font-size: 10px; }
+.dealer-report-breakdowns td:first-child strong { color: #303943; }
+.dealer-report-breakdowns .status-badge { white-space: nowrap; }
+.dealer-sales-page > .table-card .table-heading > input { min-width: 220px; min-height: 38px; padding: 0 11px; border: 1px solid #e8edef; border-radius: 8px; color: #303943; background: #fff; }
+.dealer-customer-form { padding: 20px; border: 1px solid #e9edef; border-radius: 12px; background: #fff; }
+.dealer-customer-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); align-items: end; gap: 13px; }
+.dealer-customer-fields .field { display: grid; gap: 7px; color: #78838d; font-size: 11px; font-weight: 600; }
+.dealer-customer-fields input { min-height: 40px; padding: 0 11px; border: 1px solid #e8edef; border-radius: 8px; color: #303943; background: #fff; }
+.dealer-customer-fields .button { min-height: 40px; justify-self: start; }
+
+@media (max-width: 900px) {
+  .dealer-report-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 600px) {
+  .dealer-period-field { width: 100%; }
+  .dealer-report-filters { align-items: stretch; }
+  .dealer-report-filters .field { width: 100%; }
+  .dealer-sales-page > .table-card .table-heading > input { width: 100%; min-width: 0; }
+  .dealer-report-stats { gap: 9px; }
+  .dealer-report-stats .stat-card { padding: 13px; }
+}

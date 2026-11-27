@@ -80,11 +80,15 @@ export function DealerMotorWorkspace({
   units,
   branches,
   canManage,
+  canInspectPdi = false,
+  pdiOnly = false,
+  spks = [],
   intakes = [],
   movements = [],
   notice,
   onCreate,
   onCompleteInspection,
+  onUpdatePdi,
 }) {
   const [draft, setDraft] = useState(emptyUnit);
   const priceInputRef = useRef(null);
@@ -97,6 +101,9 @@ export function DealerMotorWorkspace({
   const [inspectionDraft, setInspectionDraft] = useState({ frameNumber: '', engineNumber: '' });
   const [inspectionError, setInspectionError] = useState('');
   const [inspectionSaving, setInspectionSaving] = useState(false);
+  const [pdiNotes, setPdiNotes] = useState({});
+  const [pdiError, setPdiError] = useState('');
+  const [pdiSavingId, setPdiSavingId] = useState('');
 
   useEffect(() => {
     if (branches.length === 1) {
@@ -221,12 +228,41 @@ export function DealerMotorWorkspace({
     }
   };
   const selectedCatalogProduct = catalogProducts.find((product) => product.name === draft.model);
+  const eligiblePdiStatuses = ['available', 'reserved', 'approved_for_delivery'];
+  const pdiUnits = units.filter((unit) => eligiblePdiStatuses.includes(unit.stockStatus));
+  const prioritizedUnits = pdiOnly
+    ? [...pdiUnits].sort((left, right) => {
+      const leftSpk = left.spkNumber || spks.find((spk) => spk.unitId === left.id)?.spkNumber;
+      const rightSpk = right.spkNumber || spks.find((spk) => spk.unitId === right.id)?.spkNumber;
+      return Number(Boolean(rightSpk && right.pdiStatus !== 'completed'))
+        - Number(Boolean(leftSpk && left.pdiStatus !== 'completed'));
+    })
+    : units;
+  const unitColumnCount = (pdiOnly ? 10 : 12) + (canInspectPdi ? 1 : 0);
+
+  const updatePdiStatus = async (event, unit, action) => {
+    event?.preventDefault();
+    setPdiError('');
+    setPdiSavingId(unit.id);
+    try {
+      await onUpdatePdi(unit.id, action, pdiNotes[unit.id] || '');
+      if (action === 'complete') {
+        setPdiNotes((current) => ({ ...current, [unit.id]: '' }));
+      }
+    } catch (error) {
+      setPdiError(error.message);
+    } finally {
+      setPdiSavingId('');
+    }
+  };
 
   return <section className="content">
     <div className="page-heading">
-      <div><div className="eyebrow">INVENTARIS <span>/</span> UNIT MOTOR</div><h1>Stok unit motor</h1>
-        <p>Catat penerimaan dalam jumlah unit. Nomor rangka dan mesin dilengkapi saat inspeksi sebelum unit dapat dipilih untuk SPK.</p></div>
-      {canManage && <button
+      <div><div className="eyebrow">{pdiOnly ? 'PERSIAPAN KENDARAAN' : 'INVENTARIS'} <span>/</span> {pdiOnly ? 'PDI' : 'UNIT MOTOR'}</div><h1>{pdiOnly ? 'Inspeksi unit (PDI)' : 'Stok unit motor'}</h1>
+        <p>{pdiOnly
+          ? 'Unit yang sudah masuk SPK diprioritaskan; Anda tetap dapat memilih unit stok lain untuk diperiksa.'
+          : 'Catat penerimaan dalam jumlah unit. Nomor rangka dan mesin dilengkapi saat inspeksi sebelum unit dapat dipilih untuk SPK.'}</p></div>
+      {!pdiOnly && canManage && <button
         aria-controls="dealer-stock-entry-form"
         aria-expanded={stockFormOpen}
         className="button button-primary"
@@ -238,8 +274,19 @@ export function DealerMotorWorkspace({
     </div>
     {notice && <div className="notice" role="status">{notice}</div>}
     {formError && <div className="notice error-notice" role="alert">{formError}</div>}
-    <StockSummary intakes={intakes} units={units} />
-    {canManage && stockFormOpen && <form className="spk-form" id="dealer-stock-entry-form" onSubmit={submit}>
+    {pdiOnly
+      ? <div className="activation-summary-grid finance-summary-grid">
+        <article className="stat-card"><div className="stat-top"><span>Prioritas SPK</span></div>
+          <strong>{pdiUnits.filter((unit) => (unit.spkNumber
+            || spks.some((spk) => spk.unitId === unit.id)) && unit.pdiStatus !== 'completed').length}</strong></article>
+        <article className="stat-card"><div className="stat-top"><span>PDI berjalan</span></div>
+          <strong>{pdiUnits.filter((unit) => unit.pdiStatus === 'in_progress').length}</strong></article>
+        <article className="stat-card"><div className="stat-top"><span>Unit stok lainnya</span></div>
+          <strong>{pdiUnits.filter((unit) => !(unit.spkNumber
+            || spks.some((spk) => spk.unitId === unit.id))).length}</strong></article>
+      </div>
+      : <StockSummary intakes={intakes} units={units} />}
+    {!pdiOnly && canManage && stockFormOpen && <form className="spk-form" id="dealer-stock-entry-form" onSubmit={submit}>
       <div className="form-section">
         <div className="section-title"><span className="section-number">01</span><div><h2>Tambah unit motor</h2><p>Pilih model Honda atau ketik nama secara manual, lalu catat jumlah penerimaan.</p></div></div>
         {catalogError && <p className="notice" role="status">{catalogError}</p>}
@@ -266,26 +313,57 @@ export function DealerMotorWorkspace({
       </div>
     </form>}
     <section className="table-card full-table">
-      <div className="table-heading"><div><h2>Daftar unit</h2><p>{units.length} unit dengan nomor rangka dan mesin; hanya unit terverifikasi yang dapat dipilih untuk SPK.</p></div></div>
-      <div className="table-scroll"><table><thead><tr><th>TANGGAL MASUK</th><th>CABANG</th><th>JENIS</th><th>KENDARAAN</th><th>TAHUN / WARNA</th><th>NO. RANGKA</th><th>NO. MESIN</th><th>FAKTUR</th><th>SUPPLIER</th><th>HARGA OTR</th><th>STATUS</th><th>MUTASI TERAKHIR</th></tr></thead><tbody>
-        {units.map((unit) => <tr key={unit.id}>
+      <div className="table-heading"><div><h2>{pdiOnly ? 'Antrean inspeksi PDI' : 'Daftar unit'}</h2><p>{pdiOnly
+        ? `${pdiUnits.length} unit stok tersedia untuk inspeksi; unit ber-SPK yang belum PDI berada di prioritas teratas.`
+        : `${units.length} unit dengan nomor rangka dan mesin; hanya unit terverifikasi yang dapat dipilih untuk SPK.`}</p></div></div>
+      {pdiError && <p className="notice error-notice" role="alert">{pdiError}</p>}
+      <div className="table-scroll"><table><thead><tr><th>TANGGAL MASUK</th><th>CABANG</th><th>JENIS</th><th>KENDARAAN</th><th>TAHUN / WARNA</th><th>NO. RANGKA</th><th>NO. MESIN</th><th>FAKTUR</th><th>SUPPLIER</th><th>HARGA OTR</th>{!pdiOnly && <><th>STATUS</th><th>MUTASI TERAKHIR</th></>}{canInspectPdi && <th>PDI / PRIORITAS</th>}</tr></thead><tbody>
+        {prioritizedUnits.map((unit) => <tr key={unit.id}>
           <td>{unit.stockEntryDate}</td><td>{unit.branchName || '—'}</td>
           <td>{unit.vehicleCategory === 'mobil' ? 'Mobil' : 'Sepeda motor'}</td>
           <td>{unit.brand} {unit.model} {unit.specification}</td>
           <td>{unit.modelYear} / {unit.color}</td><td>{unit.frameNumber}</td><td>{unit.engineNumber}</td>
           <td>{unit.receivingInvoice || '—'}</td><td>{unit.supplierName || '—'}</td>
           <td className="amount">{rupiah(unit.otrPrice)}</td>
-          <td>{unit.stockStatus === 'available' ? 'Tersedia'
+          {!pdiOnly && <><td>{unit.stockStatus === 'available' ? 'Tersedia'
             : unit.stockStatus === 'reserved' ? 'SPK diproses'
             : unit.stockStatus === 'approved_for_delivery' ? 'Menunggu driver'
               : unit.stockStatus === 'in_delivery' ? 'Dalam proses kirim' : 'Terkirim'}</td>
-          <td>{dateTime(unit.statusUpdatedAt)}</td>
+          <td>{dateTime(unit.statusUpdatedAt)}</td></>}
+          {canInspectPdi && <td className="pdi-status-cell">
+            {(unit.spkNumber || spks.find((spk) => spk.unitId === unit.id)?.spkNumber)
+              && unit.pdiStatus !== 'completed'
+              && <span className="pdi-priority">Prioritas SPK {unit.spkNumber || spks.find((spk) => spk.unitId === unit.id)?.spkNumber}</span>}
+            <strong>{unit.pdiStatus === 'completed' ? 'PDI selesai'
+              : unit.pdiStatus === 'in_progress' ? 'PDI berjalan' : 'Menunggu PDI'}</strong>
+            {unit.pdiStatus === 'in_progress'
+              ? <form className="pdi-action" onSubmit={(event) => updatePdiStatus(event, unit, 'complete')}>
+                <input
+                  aria-label={`Catatan PDI ${unit.model}`}
+                  maxLength="500"
+                  onChange={(event) => setPdiNotes((current) => ({ ...current, [unit.id]: event.target.value }))}
+                  placeholder="Catatan inspeksi (opsional)"
+                  value={pdiNotes[unit.id] || ''}
+                />
+                <button className="button button-primary" disabled={pdiSavingId === unit.id} type="submit">
+                  {pdiSavingId === unit.id ? 'Menyimpan…' : 'Selesaikan PDI'}
+                </button>
+              </form>
+              : unit.pdiStatus !== 'completed' && <button
+                className="button button-quiet"
+                disabled={pdiSavingId === unit.id}
+                onClick={() => updatePdiStatus(null, unit, 'start')}
+                type="button"
+              >{pdiSavingId === unit.id ? 'Menyimpan…' : 'Mulai inspeksi'}</button>}
+          </td>}
         </tr>
         )}
-        {!units.length && <tr><td colSpan="12">Belum ada unit terverifikasi. Penerimaan dengan jumlah tercatat pada daftar inspeksi di bawah.</td></tr>}
+        {!prioritizedUnits.length && <tr><td colSpan={unitColumnCount}>{pdiOnly
+          ? 'Belum ada unit stok yang dapat diperiksa.'
+          : 'Belum ada unit terverifikasi. Penerimaan dengan jumlah tercatat pada daftar inspeksi di bawah.'}</td></tr>}
       </tbody></table></div>
     </section>
-    <section className="table-card full-table">
+    {!pdiOnly && <section className="table-card full-table">
       <div className="table-heading"><div><h2>Penerimaan menunggu inspeksi</h2><p>Lengkapi nomor rangka dan mesin per unit; stok masuk belum dapat dipakai untuk SPK.</p></div></div>
       <div className="table-scroll"><table><thead><tr><th>TANGGAL</th><th>CABANG</th><th>KENDARAAN</th><th>TAHUN / WARNA</th><th>JUMLAH MASUK</th><th>TERSISA</th><th>FAKTUR</th><th>SUPPLIER</th><th>HARGA OTR</th><th>AKSI</th></tr></thead><tbody>
         {intakes.filter((intake) => intake.quantityRemaining > 0).map((intake) => <Fragment key={intake.id}>
@@ -306,8 +384,8 @@ export function DealerMotorWorkspace({
         </Fragment>)}
         {!intakes.some((intake) => intake.quantityRemaining > 0) && <tr><td colSpan="10">Tidak ada penerimaan yang menunggu inspeksi.</td></tr>}
       </tbody></table></div>
-    </section>
-    <section className="table-card full-table">
+    </section>}
+    {!pdiOnly && <section className="table-card full-table">
       <div className="table-heading"><div><h2>Riwayat stok masuk/keluar</h2><p>{movements.length} mutasi terakhir</p></div></div>
       <div className="table-scroll"><table><thead><tr><th>TANGGAL</th><th>ARUS STOK</th><th>CABANG</th><th>MOTOR</th><th>JUMLAH</th><th>NO. RANGKA</th><th>SPK</th><th>PETUGAS</th><th>KETERANGAN</th></tr></thead><tbody>
         {movements.map((movement) => <tr key={movement.id}>
@@ -323,7 +401,7 @@ export function DealerMotorWorkspace({
         </tr>)}
         {!movements.length && <tr><td colSpan="9">Belum ada mutasi stok.</td></tr>}
       </tbody></table></div>
-    </section>
+    </section>}
   </section>;
 }
 

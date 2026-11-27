@@ -360,7 +360,7 @@ export function BranchManagement({ role, isAuthenticated }) {
       <div className="table-scroll"><table><thead><tr><th>CABANG</th><th>JUMLAH PESANAN</th><th>PENJUALAN</th></tr></thead><tbody>{report.map((branch) => <tr key={branch.branchId}><td>{branch.branchName}</td><td>{branch.orderCount}</td><td className="amount">{money(branch.salesTotal)}</td></tr>)}</tbody></table></div>
     </section>}
 
-    {owner && <section className="table-card branch-addon-card">
+    {owner && data && data.activeBranches >= data.branchLimit && <section className="table-card branch-addon-card">
       <div className="table-heading"><div><h2>Tambah kuota cabang</h2><p>Pilih jumlah cabang tambahan dan masa aktifnya. Pembayaran diproses langsung melalui Midtrans.</p></div></div>
       <div className="branch-addon-form">
         <label className="field"><span>Jumlah cabang tambahan</span><input min="1" max="100" onChange={(event) => setQuantity(event.target.value)} type="number" value={quantity} /></label>

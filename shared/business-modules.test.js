@@ -49,4 +49,14 @@ describe('business access permissions', () => {
       expect(filtered).not.toContain('receiptsView');
     }
   });
+
+  test('exposes PDI and delivery permissions for dealer workspaces', () => {
+    for (const businessType of ['dealer_motor', 'dealer_vehicle']) {
+      const modules = businessTypes[businessType].modules.map(([id]) => id);
+      expect(modules).toContain('pdi');
+      expect(modules).toContain('delivery');
+      expect(filterPermissionsForBusiness(['pdiManage', 'waybillManage'], businessType, modules))
+        .toEqual(['pdiManage', 'waybillManage']);
+    }
+  });
 });

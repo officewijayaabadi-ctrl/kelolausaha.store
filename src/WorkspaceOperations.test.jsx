@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { AttendanceWorkspace, buildAttendanceCsv } from './WorkspaceOperations';
+import { AttendanceWorkspace, BranchManagement, buildAttendanceCsv } from './WorkspaceOperations';
 
 const mediaDevicesDescriptor = Object.getOwnPropertyDescriptor(navigator, 'mediaDevices');
 const geolocationDescriptor = Object.getOwnPropertyDescriptor(navigator, 'geolocation');
@@ -18,6 +18,45 @@ afterEach(() => {
     if (descriptor) Object.defineProperty(target, key, descriptor);
     else delete target[key];
   });
+});
+
+test('shows branch add-on checkout only after the current quota is exhausted', async () => {
+  const fetchMock = vi.fn(async (url) => ({
+    ok: true,
+    json: async () => url.endsWith('/branches/report')
+      ? { branches: [] }
+      : {
+        branches: [],
+        branchLimit: 3,
+        activeBranches: 3,
+        canManage: true,
+      },
+  }));
+  vi.stubGlobal('fetch', fetchMock);
+  render(<BranchManagement isAuthenticated role="OWNER" />);
+
+  expect(await screen.findByRole('heading', { name: 'Tambah kuota cabang' })).toBeDefined();
+  expect(screen.getByRole('button', { name: 'Bayar dengan Midtrans' })).toBeDefined();
+  expect(screen.getByLabelText('Masa aktif per cabang').options[0].textContent).toContain('100.000');
+});
+
+test('keeps branch add-on checkout hidden while quota remains', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (url) => ({
+    ok: true,
+    json: async () => url.endsWith('/branches/report')
+      ? { branches: [] }
+      : {
+        branches: [],
+        branchLimit: 3,
+        activeBranches: 2,
+        canManage: true,
+      },
+  })));
+  render(<BranchManagement isAuthenticated role="OWNER" />);
+
+  await waitFor(() => expect(screen.getByText(/Buat cabang dan bagikan link undangan/)).toBeDefined());
+  expect(screen.queryByRole('heading', { name: 'Tambah kuota cabang' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Bayar dengan Midtrans' })).toBeNull();
 });
 
 test('exports filtered attendance data as safe CSV rows', () => {

@@ -65,13 +65,13 @@ let supportIo = null;
 const themeIds = dashboardThemeIds;
 const imageExtensions = new Set(['png', 'jpg', 'webp', 'ico']);
 const permissionSets = {
-  'SUPER ADMIN': ['dashboard', 'spkCreate', 'spkViewAll', 'spkViewOwn', 'spkVerify', 'spkApprove', 'customerManage', 'salesManage', 'unitManage', 'leasingManage', 'posAccess', 'priceManage', 'transactionsView', 'receiptsView', 'userManage', 'accessManage', 'themeManage', 'attendanceView', 'branchManage', 'deliveryScheduleManage'],
-  OWNER: ['dashboard', 'spkCreate', 'spkViewAll', 'spkViewOwn', 'spkVerify', 'spkApprove', 'customerManage', 'salesManage', 'unitManage', 'leasingManage', 'reportsView', 'targetManage', 'posAccess', 'priceManage', 'transactionsView', 'receiptsView', 'userManage', 'accessManage', 'themeManage', 'activationManage', 'financeView', 'financeManage', 'attendanceView', 'attendanceManage', 'branchManage', 'deliveryScheduleManage'],
+  'SUPER ADMIN': ['dashboard', 'spkCreate', 'spkViewAll', 'spkViewOwn', 'spkVerify', 'spkApprove', 'customerManage', 'salesManage', 'unitManage', 'pdiManage', 'leasingManage', 'posAccess', 'priceManage', 'transactionsView', 'receiptsView', 'userManage', 'accessManage', 'themeManage', 'attendanceView', 'branchManage', 'deliveryScheduleManage', 'waybillManage'],
+  OWNER: ['dashboard', 'spkCreate', 'spkViewAll', 'spkViewOwn', 'spkVerify', 'spkApprove', 'customerManage', 'salesManage', 'unitManage', 'pdiManage', 'leasingManage', 'reportsView', 'targetManage', 'posAccess', 'priceManage', 'transactionsView', 'receiptsView', 'userManage', 'accessManage', 'themeManage', 'activationManage', 'financeView', 'financeManage', 'attendanceView', 'attendanceManage', 'branchManage', 'deliveryScheduleManage', 'waybillManage'],
   HRD: ['dashboard', 'userManage', 'attendanceView', 'attendanceManage'],
   SVP: ['dashboard', 'spkViewAll', 'unitManage', 'salesManage', 'spkApprove', 'reportsView', 'attendanceView'],
   SPV: ['dashboard', 'attendanceView', 'unitManage'],
   'KEPALA TOKO': ['dashboard', 'attendanceView'],
-  ADMIN: ['dashboard', 'spkCreate', 'spkViewAll', 'spkVerify', 'customerManage', 'salesManage', 'unitManage', 'leasingManage', 'posAccess', 'priceManage', 'transactionsView', 'receiptsView', 'attendanceView', 'deliveryScheduleManage'],
+  ADMIN: ['dashboard', 'spkCreate', 'spkViewAll', 'spkVerify', 'customerManage', 'salesManage', 'unitManage', 'pdiManage', 'leasingManage', 'posAccess', 'priceManage', 'transactionsView', 'receiptsView', 'attendanceView', 'deliveryScheduleManage', 'waybillManage'],
   SALES: ['dashboard', 'spkCreate', 'spkViewOwn', 'customerManage', 'attendanceView'],
   KASIR: ['dashboard', 'posAccess', 'priceManage', 'transactionsView', 'receiptsView', 'attendanceView'],
   DRIVER: ['dashboard', 'deliveryManage', 'attendanceView'],
@@ -1013,16 +1013,25 @@ app.post('/api/team/invites', authenticate, requireRole('OWNER', 'SUPER ADMIN'),
   }
 });
 
-app.get('/api/team/members', authenticate, requireRole('OWNER', 'SUPER ADMIN'), requireTenant, requireActiveTenant, async (req, res, next) => {
+app.get('/api/team/members', authenticate, requireRole('OWNER', 'SUPER ADMIN', 'HRD'), requireTenant, requireActiveTenant, async (req, res, next) => {
   try {
+    const isHrdDirectory = req.user.role === 'HRD';
+    const memberColumns = isHrdDirectory
+      ? `u.id, u.name, u.email, u.role, u.active,
+         u.approval_status AS "approvalStatus", u.created_at AS "createdAt",
+         b.name AS "branchName"`
+      : `u.id, u.name, u.email, u.role, u.permissions,
+         u.industry_role AS "industryRole",
+         u.industry_permissions AS "industryPermissions",
+         u.active, u.approval_status AS "approvalStatus",
+         u.created_at AS "createdAt", b.name AS "branchName"`;
     const result = await pool.query(
-      `SELECT id, name, email, role, permissions,
-              industry_role AS "industryRole",
-              industry_permissions AS "industryPermissions",
-              active,
-              approval_status AS "approvalStatus", created_at AS "createdAt"
-       FROM users WHERE company_id = $1
-       ORDER BY CASE WHEN approval_status = 'pending' THEN 0 ELSE 1 END, created_at DESC`,
+      `SELECT ${memberColumns}
+       FROM users u
+       LEFT JOIN business_branches b
+         ON b.id = u.branch_id AND b.company_id = u.company_id
+       WHERE u.company_id = $1
+       ORDER BY CASE WHEN u.approval_status = 'pending' THEN 0 ELSE 1 END, u.created_at DESC`,
       [req.user.company_id],
     );
     res.json({
@@ -1761,13 +1770,15 @@ app.post('/api/billing/midtrans-webhook', async (req, res, next) => {
         if (plan.months === null) {
           await client.query(
             `UPDATE companies SET plan_id = $1, subscription_status = 'lifetime',
-             active_until = NULL WHERE id = $2`,
+             active_until = NULL, activated_at = now(), activation_source = 'midtrans'
+             WHERE id = $2`,
             [plan.id, order.company_id],
           );
         } else {
           await client.query(
             `UPDATE companies
              SET plan_id = $1, subscription_status = 'active',
+                 activated_at = now(), activation_source = 'midtrans',
                  active_until = GREATEST(COALESCE(active_until, now()), now())
                    + ($2 * interval '1 month')
              WHERE id = $3`,
@@ -2055,8 +2066,11 @@ app.get('/api/platform/businesses', authenticate, requireRole('PLATFORM_OWNER'),
       FROM support_tickets
     `);
     const recentBusinessResult = await pool.query(`
-      SELECT id, name, business_type, created_at
-      FROM companies ORDER BY created_at DESC LIMIT 5
+      SELECT c.id, c.name, c.business_type, c.created_at,
+             COALESCE(c.activated_at, c.created_at) AS activated_at,
+             c.active_until, c.trial_ends_at, c.plan_id, c.subscription_status
+      FROM companies c
+      ORDER BY c.created_at DESC LIMIT 3
     `);
     const recentPaymentResult = await pool.query(`
       SELECT b.id, b.plan_id, b.amount, b.status, b.paid_at, b.created_at, c.name AS business_name
@@ -2101,6 +2115,70 @@ app.put('/api/platform/businesses/:companyId/branch-limit', authenticate, requir
     res.json({ business: result.rows[0] });
   } catch (error) {
     next(error);
+  }
+});
+
+app.put('/api/platform/businesses/:companyId/manual-activation', authenticate, requireRole('PLATFORM_OWNER'), async (req, res, next) => {
+  const companyId = req.params.companyId;
+  const plan = getPlan(typeof req.body?.planId === 'string' ? req.body.planId : '');
+  const note = typeof req.body?.note === 'string' ? req.body.note.trim() : '';
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(companyId)
+    || !plan || note.length > 500) {
+    return res.status(400).json({ message: 'Workspace, paket, atau catatan aktivasi manual tidak valid.' });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const company = await client.query(
+      'SELECT id FROM companies WHERE id = $1 FOR UPDATE',
+      [companyId],
+    );
+    if (!company.rowCount) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ message: 'Workspace tidak ditemukan.' });
+    }
+    const result = plan.months === null
+      ? await client.query(
+        `UPDATE companies
+         SET plan_id = $1, subscription_status = 'lifetime', active_until = NULL,
+             activated_at = now(), activation_source = 'manual'
+         WHERE id = $2
+         RETURNING id, plan_id AS "planId", subscription_status AS status,
+                   activated_at AS "activatedAt", active_until AS "activeUntil"`,
+        [plan.id, companyId],
+      )
+      : await client.query(
+        `UPDATE companies
+         SET plan_id = $1, subscription_status = 'active',
+             activated_at = now(), activation_source = 'manual',
+             active_until = GREATEST(COALESCE(active_until, now()), now())
+               + ($2 * interval '1 month')
+         WHERE id = $3
+         RETURNING id, plan_id AS "planId", subscription_status AS status,
+                   activated_at AS "activatedAt", active_until AS "activeUntil"`,
+        [plan.id, plan.months, companyId],
+      );
+    await client.query(
+      `INSERT INTO company_manual_activations
+         (company_id, plan_id, duration_months, activated_by, activated_at, active_until, note)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        companyId,
+        plan.id,
+        plan.months ?? 0,
+        req.user.id,
+        result.rows[0].activatedAt,
+        result.rows[0].activeUntil,
+        note || null,
+      ],
+    );
+    await client.query('COMMIT');
+    res.json({ business: result.rows[0] });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    next(error);
+  } finally {
+    client.release();
   }
 });
 

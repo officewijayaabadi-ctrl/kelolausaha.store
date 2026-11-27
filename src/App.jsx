@@ -29,6 +29,12 @@ import { AttendanceWorkspace, BranchManagement } from './WorkspaceOperations.jsx
 import { DealerMotorWorkspace, DriverDeliveryWorkspace } from './DealerMotorWorkspace.jsx';
 import { BusinessProfileSettings } from './BusinessProfileSettings.jsx';
 import {
+  DealerCustomersPage,
+  DealerSalesReportPage,
+  DealerSalesTeamPage,
+  DealerTargetsPage,
+} from './DealerSalesPages.jsx';
+import {
   getSpkWhatsAppUrl,
   getWaybillWhatsAppUrl,
   SpkPrintDocument,
@@ -169,8 +175,10 @@ const accessModules = [
   { id: 'customerManage', label: 'Data pelanggan', group: 'Data pelanggan' },
   { id: 'salesManage', label: 'Data sales', group: 'Data dealer' },
   { id: 'unitManage', label: 'Unit dealer & motor', group: 'Data dealer' },
+  { id: 'pdiManage', label: 'Inspeksi unit (PDI)', group: 'Data dealer' },
   { id: 'deliveryManage', label: 'Pengiriman motor', group: 'Operasional' },
   { id: 'deliveryScheduleManage', label: 'Jadwal pengiriman', group: 'Operasional' },
+  { id: 'waybillManage', label: 'Terbitkan surat jalan', group: 'Operasional' },
   { id: 'leasingManage', label: 'Data leasing & promo', group: 'Data dealer' },
   { id: 'reportsView', label: 'Laporan & performa', group: 'Laporan' },
   { id: 'targetManage', label: 'Target penjualan', group: 'Laporan' },
@@ -193,13 +201,13 @@ const accessModules = [
 ];
 
 const rolePermissions = {
-  'SUPER ADMIN': ['dashboard', 'spkCreate', 'spkViewAll', 'spkViewOwn', 'spkVerify', 'spkApprove', 'customerManage', 'salesManage', 'unitManage', 'leasingManage', 'posAccess', 'priceManage', 'transactionsView', 'receiptsView', 'userManage', 'accessManage', 'themeManage', 'attendanceView', 'branchManage', 'deliveryScheduleManage'],
-  OWNER: ['dashboard', 'spkCreate', 'spkViewAll', 'spkViewOwn', 'spkVerify', 'spkApprove', 'customerManage', 'salesManage', 'unitManage', 'leasingManage', 'reportsView', 'targetManage', 'posAccess', 'priceManage', 'transactionsView', 'receiptsView', 'userManage', 'accessManage', 'themeManage', 'activationManage', 'financeView', 'financeManage', 'attendanceView', 'attendanceManage', 'branchManage', 'deliveryScheduleManage'],
+  'SUPER ADMIN': ['dashboard', 'spkCreate', 'spkViewAll', 'spkViewOwn', 'spkVerify', 'spkApprove', 'customerManage', 'salesManage', 'unitManage', 'pdiManage', 'leasingManage', 'posAccess', 'priceManage', 'transactionsView', 'receiptsView', 'userManage', 'accessManage', 'themeManage', 'attendanceView', 'branchManage', 'deliveryScheduleManage', 'waybillManage'],
+  OWNER: ['dashboard', 'spkCreate', 'spkViewAll', 'spkViewOwn', 'spkVerify', 'spkApprove', 'customerManage', 'salesManage', 'unitManage', 'pdiManage', 'leasingManage', 'reportsView', 'targetManage', 'posAccess', 'priceManage', 'transactionsView', 'receiptsView', 'userManage', 'accessManage', 'themeManage', 'activationManage', 'financeView', 'financeManage', 'attendanceView', 'attendanceManage', 'branchManage', 'deliveryScheduleManage', 'waybillManage'],
   HRD: ['dashboard', 'userManage', 'attendanceView', 'attendanceManage', 'branchManage'],
   SVP: ['dashboard', 'spkViewAll', 'unitManage', 'salesManage', 'spkApprove', 'reportsView', 'attendanceView'],
   SPV: ['dashboard', 'attendanceView', 'unitManage'],
   'KEPALA TOKO': ['dashboard', 'attendanceView'],
-  ADMIN: ['dashboard', 'spkCreate', 'spkViewAll', 'spkVerify', 'customerManage', 'salesManage', 'unitManage', 'leasingManage', 'posAccess', 'priceManage', 'transactionsView', 'receiptsView', 'attendanceView', 'deliveryScheduleManage'],
+  ADMIN: ['dashboard', 'spkCreate', 'spkViewAll', 'spkVerify', 'customerManage', 'salesManage', 'unitManage', 'pdiManage', 'leasingManage', 'posAccess', 'priceManage', 'transactionsView', 'receiptsView', 'attendanceView', 'deliveryScheduleManage', 'waybillManage'],
   SALES: ['dashboard', 'spkCreate', 'spkViewOwn', 'customerManage', 'attendanceView'],
   KASIR: ['dashboard', 'posAccess', 'priceManage', 'transactionsView', 'receiptsView', 'attendanceView'],
   DRIVER: ['dashboard', 'deliveryManage', 'attendanceView'],
@@ -223,6 +231,7 @@ const extraPermissionMenus = [
   ['Customer', '♙', 'customerManage'],
   ['Sales', '♧', 'salesManage'],
   ['Stok', '⌂', 'unitManage'],
+  ['PDI', '✓', 'pdiManage'],
   ['Pengiriman', '↗', 'deliveryManage'],
   ['Leasing & Promo', '▣', 'leasingManage'],
   ['Laporan Penjualan', '▥', 'reportsView'],
@@ -247,6 +256,7 @@ function menuPermission(label) {
   if (['Semua SPK', 'SPK'].includes(label)) return 'spkViewAll';
   if (['SPK Saya', 'Pengajuan', 'Follow Up'].includes(label)) return 'spkViewOwn';
   if (['Stok', 'Semua Unit', 'Unit Dealer', 'Motor', 'Unit & Motor'].includes(label)) return 'unitManage';
+  if (label === 'PDI') return 'pdiManage';
   if (label === 'Pengiriman') return 'deliveryManage';
   if (['Laporan Penjualan', 'Performance'].includes(label)) return 'reportsView';
   if (label === 'Target') return 'targetManage';
@@ -298,7 +308,7 @@ function getWorkspaceModulesForBusiness(businessType, configuredModules) {
     ? configuredModules
     : defaultModules;
   const requiredModules = ['dealer_motor', 'dealer_vehicle'].includes(businessType)
-    ? ['vehicles']
+    ? ['vehicles', 'pdi', 'delivery']
     : [];
   return [...new Set([...modules, ...requiredModules])];
 }
@@ -318,7 +328,7 @@ const businessMenuLabels = {
 const dealerOnlyMenus = new Set([
   'Input SPK', 'Semua SPK', 'SPK', 'SPK Saya', 'Pengajuan', 'Follow Up',
   'Verifikasi SPK', 'Approval', 'Sales', 'Motor', 'Leasing', 'Leasing & Promo',
-  'Dokumen', 'Pengiriman', 'Performance', 'Stok', 'Semua Unit', 'Unit Dealer', 'Unit & Motor', 'Target',
+  'Dokumen', 'Pengiriman', 'Performance', 'Stok', 'PDI', 'Semua Unit', 'Unit Dealer', 'Unit & Motor', 'Target',
 ]);
 
 const initialUsers = [
@@ -387,6 +397,12 @@ const previewDealerMotorUnits = [{
 const statusClass = (status) => status.toLowerCase().replaceAll(' ', '-');
 const formatLedgerEntryDate = (value) => new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium' })
   .format(new Date(`${String(value).slice(0, 10)}T00:00:00`));
+const formatWorkspaceDateTime = (value) => {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? '—'
+    : new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+};
 
 function isTenantWorkspaceHost(hostname = window.location.hostname) {
   const host = String(hostname).toLowerCase();
@@ -1116,6 +1132,8 @@ function App() {
   const [platformData, setPlatformData] = useState(null);
   const [platformBranchLimits, setPlatformBranchLimits] = useState({});
   const [platformBranchLimitSaving, setPlatformBranchLimitSaving] = useState('');
+  const [platformManualPlanSelections, setPlatformManualPlanSelections] = useState({});
+  const [platformManualActivationSaving, setPlatformManualActivationSaving] = useState('');
   const [supportName, setSupportName] = useState('');
   const [supportEmail, setSupportEmail] = useState('');
   const [supportSubject, setSupportSubject] = useState('Bagaimana cara mendaftarkan usaha?');
@@ -1182,6 +1200,7 @@ function App() {
       : isTenantWorkspaceHost() ? 'login' : null
   ));
   const [spks, setSpks] = useState(initialSpks);
+  const [businessCustomers, setBusinessCustomers] = useState([]);
   const [users, setUsers] = useState(initialUsers);
   const [workspaceName, setWorkspaceName] = useState('KelolaUsaha.store');
   const [workspaceUrl, setWorkspaceUrl] = useState('');
@@ -1785,6 +1804,47 @@ function App() {
     }
   };
 
+  const manuallyActivatePlatformBusiness = async (business) => {
+    const planId = platformManualPlanSelections[business.id] || 'year_1';
+    setPlatformManualActivationSaving(business.id);
+    setBillingError('');
+    try {
+      const response = await fetch(`/api/platform/businesses/${business.id}/manual-activation`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ planId }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message || 'Aktivasi manual tidak dapat disimpan.');
+      if (!result.business?.id || result.business.planId !== planId || !result.business.activatedAt) {
+        throw new Error('Data aktivasi manual dari server tidak valid.');
+      }
+      const updatedFields = {
+        plan_id: result.business.planId,
+        status: result.business.status,
+        active_until: result.business.activeUntil,
+        activated_at: result.business.activatedAt,
+      };
+      setPlatformData((current) => ({
+        ...current,
+        businesses: current.businesses.map((item) => item.id === business.id
+          ? { ...item, ...updatedFields }
+          : item),
+        activity: {
+          ...current.activity,
+          recentBusinesses: current.activity.recentBusinesses.map((item) => item.id === business.id
+            ? { ...item, ...updatedFields }
+            : item),
+        },
+      }));
+      setNotice(`${business.name} diaktifkan manual dengan paket ${activationPlans.find((plan) => plan.id === planId)?.label || planId}.`);
+    } catch (error) {
+      setBillingError(error.message);
+    } finally {
+      setPlatformManualActivationSaving('');
+    }
+  };
+
   const getWhatsAppReceiptUrl = (transaction) => {
     const phone = normalizeWhatsAppNumber(transaction.whatsapp || '');
     if (phone.length < 10 || phone.length > 15) return '';
@@ -2154,6 +2214,74 @@ function App() {
     'disetujui',
   );
 
+  const issueWaybill = async (spk) => {
+    if (!activeUser.permissions.includes('waybillManage')) {
+      setNotice('Akun ini tidak memiliki hak akses untuk membuat surat jalan.');
+      return;
+    }
+    if (spk.status !== 'DISETUJUI' || spk.pdiStatus !== 'completed' || spk.waybillNumber) {
+      setNotice('Surat jalan hanya dapat dibuat untuk SPK yang disetujui dan unitnya telah selesai PDI.');
+      return;
+    }
+    if (isAuthenticated) {
+      try {
+        const response = await fetch(`/api/dealer-motor/spks/${spk.id}/waybill`, { method: 'POST' });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message || 'Surat jalan tidak dapat dibuat.');
+        if (!result.spk?.waybillNumber || result.spk.deliveryStatus !== 'ready') {
+          throw new Error('Data surat jalan dari server tidak valid.');
+        }
+        setSpks((current) => current.map((item) => (
+          item.id === spk.id ? { ...item, ...result.spk } : item
+        )));
+        setNotice(`Surat jalan ${result.spk.waybillNumber} berhasil dibuat.`);
+      } catch (error) {
+        setNotice(error.message);
+      }
+      return;
+    }
+    const waybillNumber = (spk.spkNumber || spk.id).replace(/^SPK-/, 'SJ-');
+    setSpks((current) => current.map((item) => (
+      item.id === spk.id
+        ? { ...item, waybillNumber, waybillIssuedAt: new Date().toISOString(), deliveryStatus: 'ready' }
+        : item
+    )));
+    setNotice(`Surat jalan ${waybillNumber} berhasil dibuat.`);
+  };
+
+  const updatePdi = async (unitId, action, note) => {
+    if (!activeUser.permissions.includes('pdiManage')) {
+      throw new Error('Akun ini tidak memiliki hak akses PDI.');
+    }
+    let updatedUnit;
+    if (isAuthenticated) {
+      const response = await fetch(`/api/dealer-motor/units/${unitId}/pdi`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, note }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message || 'Status PDI unit tidak dapat diperbarui.');
+      if (!result.unit?.id || !['in_progress', 'completed'].includes(result.unit.pdiStatus)) {
+        throw new Error('Data status PDI dari server tidak valid.');
+      }
+      updatedUnit = result.unit;
+    } else {
+      updatedUnit = {
+        id: unitId,
+        pdiStatus: action === 'start' ? 'in_progress' : 'completed',
+        statusUpdatedAt: new Date().toISOString(),
+      };
+    }
+    setDealerMotorUnits((current) => current.map((unit) => (
+      unit.id === unitId ? { ...unit, ...updatedUnit } : unit
+    )));
+    setSpks((current) => current.map((item) => (
+      item.unitId === unitId ? { ...item, pdiStatus: updatedUnit.pdiStatus } : item
+    )));
+    setNotice(action === 'start' ? 'PDI unit dimulai.' : 'PDI unit selesai.');
+  };
+
   const rejectSpk = async (spk) => {
     const permission = spk.status === 'SUBMITTED' ? 'spkVerify' : 'spkApprove';
     if (!activeUser.permissions.includes(permission)) {
@@ -2340,6 +2468,7 @@ function App() {
     setDealerMotorIntakes([]);
     setDealerMotorMovements([]);
     setSpks([]);
+    setBusinessCustomers([]);
     setWorkspaceBranches([]);
     const businessName = result.business?.name || (user.role === 'PLATFORM_OWNER' ? 'KelolaUsaha.store' : workspaceName);
     const orderWorkspaceKey = result.business?.id || businessName;
@@ -2499,6 +2628,7 @@ function App() {
     setThemeDraft(nextSettings);
     setThemeDraftDirty(true);
   };
+  const workspaceLogoUrl = themeSettings.logoUrl || themeSettings.dashboardLogoUrl;
   const receiptSettings = {
     ...defaultThemeSettings.receiptSettings,
     ...themeSettings.receiptSettings,
@@ -2528,6 +2658,12 @@ function App() {
     && workspaceModules.includes('sales_orders')
     && activeUser.permissions.includes('spkApprove');
   const pendingApprovalCount = spks.filter((item) => item.status === 'APPROVAL SVP').length;
+  const canManagePdi = ['dealer_motor', 'dealer_vehicle'].includes(businessType)
+    && workspaceModules.includes('pdi')
+    && activeUser.permissions.includes('pdiManage');
+  const priorityPdiCount = dealerMotorUnits.filter((unit) => (
+    unit.spkNumber && unit.pdiStatus !== 'completed'
+  )).length;
   const enabledMenus = {
     Kasir: 'pos',
     'Daftar Harga': 'prices',
@@ -2543,6 +2679,7 @@ function App() {
     Performance: 'sales_reports',
     Target: 'targets',
     Stok: 'vehicles',
+    PDI: 'pdi',
     'Semua Unit': 'vehicles',
     'Unit Dealer': 'vehicles',
     'Unit & Motor': 'vehicles',
@@ -2906,7 +3043,7 @@ function App() {
   }, [accountMenuOpen, accountProfileOpen, workspaceMenuOpen]);
 
   useEffect(() => {
-    if (!isAuthenticated || demoMode || !['OWNER', 'SUPER ADMIN'].includes(activeUser.role)) return undefined;
+    if (!isAuthenticated || demoMode || !['OWNER', 'SUPER ADMIN', 'HRD'].includes(activeUser.role)) return undefined;
     let cancelled = false;
     const loadTeamMembers = async () => {
       try {
@@ -2915,14 +3052,25 @@ function App() {
         const result = await response.json();
         if (!Array.isArray(result.users)) throw new Error('Daftar anggota dari server tidak valid.');
         if (!cancelled) {
-          setUsers(result.users.map((user) => ({
+          const members = result.users.map((user) => ({
             ...user,
             permissions: filterPermissionsForBusiness(
               Array.isArray(user.permissions) ? user.permissions : rolePermissions[user.role] ?? [],
               businessType,
               workspaceModules,
             ),
-          })));
+          }));
+          if (!members.some((user) => user.id === activeUser.id)) {
+            members.push({
+              ...activeUser,
+              permissions: filterPermissionsForBusiness(
+                activeUser.permissions,
+                businessType,
+                workspaceModules,
+              ),
+            });
+          }
+          setUsers(members);
         }
       } catch (error) {
         if (!cancelled) setNotice(error.message);
@@ -2932,7 +3080,7 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [activeUser.role, businessType, isAuthenticated, demoMode, workspaceModules]);
+  }, [activeUser.id, activeUser.role, businessType, isAuthenticated, demoMode, workspaceModules]);
   useEffect(() => {
     if (!isAuthenticated || needsBusinessSetup) return undefined;
     let cancelled = false;
@@ -3144,6 +3292,7 @@ function App() {
           stockMovements.set(movement.productId, totals);
         });
         if (!cancelled) {
+          if (Array.isArray(result.customers)) setBusinessCustomers(result.customers);
           setPriceItems(result.products.map((product) => ({
             id: product.id,
             name: product.name,
@@ -3169,7 +3318,9 @@ function App() {
   useEffect(() => {
     const canManageBranches = activeUser.permissions.includes('branchManage');
     const canLoadUnits = workspaceModules.includes('vehicles')
-      && (activeUser.permissions.includes('unitManage') || activeUser.permissions.includes('spkCreate'));
+      && (activeUser.permissions.includes('unitManage')
+        || activeUser.permissions.includes('spkCreate')
+        || activeUser.permissions.includes('pdiManage'));
     const canLoadSpks = workspaceModules.includes('sales_orders');
     if (!isAuthenticated || needsBusinessSetup || (!canManageBranches && !canLoadUnits && !canLoadSpks)) return undefined;
     let cancelled = false;
@@ -3791,8 +3942,8 @@ function App() {
     >
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark">{themeSettings.dashboardLogoUrl || themeSettings.logoUrl
-            ? <img alt={`${workspaceName} logo`} src={themeSettings.dashboardLogoUrl || themeSettings.logoUrl} />
+          <div className="brand-mark">{workspaceLogoUrl
+            ? <img alt={`${workspaceName} logo`} src={workspaceLogoUrl} />
             : <span className="brand-initials">{initialsFor(workspaceName)}</span>}</div>
           <div className="brand-copy">
             <strong>{workspaceName}</strong>
@@ -3813,7 +3964,9 @@ function App() {
               title="Buka menu workspace"
               type="button"
             >
-              <span className="dealer-icon">{workspaceName.charAt(0).toUpperCase()}</span>
+              <span className="dealer-icon">{workspaceLogoUrl
+                ? <img alt="" src={workspaceLogoUrl} />
+                : workspaceName.charAt(0).toUpperCase()}</span>
               <span className="dealer-copy"><strong>{workspaceName}</strong><small>Workspace aktif</small></span>
               <span className="switch-chevron">{workspaceMenuOpen ? '⌃' : '⌄'}</span>
             </button>
@@ -3839,7 +3992,9 @@ function App() {
             </div>}
           </div>
           : <div className="dealer-switch">
-            <span className="dealer-icon">{workspaceName.charAt(0).toUpperCase()}</span>
+            <span className="dealer-icon">{workspaceLogoUrl
+              ? <img alt="" src={workspaceLogoUrl} />
+              : workspaceName.charAt(0).toUpperCase()}</span>
             <span className="dealer-copy"><strong>{workspaceName}</strong><small>Workspace aktif</small></span>
             <span className="switch-chevron">⌄</span>
           </div>}
@@ -3859,6 +4014,7 @@ function App() {
                   <span className="nav-icon" aria-hidden="true">{icon}</span>
                   <span>{businessMenuLabels[businessType]?.[label] || label}</span>
                   {label === 'Approval' && pendingApprovalCount > 0 && <span className="nav-count">{pendingApprovalCount}</span>}
+                  {label === 'PDI' && priorityPdiCount > 0 && <span className="nav-count">{priorityPdiCount}</span>}
                 </button>
               ))}
             </div>
@@ -3883,8 +4039,8 @@ function App() {
       <main className="main-area">
         <header className="topbar">
           {themeSettings.logoPosition === 'header' && <div className="topbar-brand">
-            <span>{themeSettings.dashboardLogoUrl || themeSettings.logoUrl
-              ? <img alt="" src={themeSettings.dashboardLogoUrl || themeSettings.logoUrl} />
+            <span>{workspaceLogoUrl
+              ? <img alt="" src={workspaceLogoUrl} />
               : initialsFor(workspaceName)}</span>
             <strong>{workspaceName}</strong>
           </div>}
@@ -3922,17 +4078,23 @@ function App() {
               </select>
             </label>}
             {themeSettings.showNotifications && <button
-              aria-label={canApproveSpk
+              aria-label={canManagePdi
+                ? `Prioritas inspeksi PDI${priorityPdiCount ? `, ${priorityPdiCount} unit ber-SPK` : ''}`
+                : canApproveSpk
                 ? `Notifikasi persetujuan${pendingApprovalCount ? `, ${pendingApprovalCount} menunggu` : ''}`
                 : `Notifikasi${unreadBillingNotifications.length ? `, ${unreadBillingNotifications.length} belum dibaca` : ''}`}
               className="icon-button notification-button"
-              onClick={() => openPage(canApproveSpk
-                ? 'Approval'
+              onClick={() => openPage(canManagePdi
+                ? 'PDI'
+                : canApproveSpk
+                  ? 'Approval'
                 : activeUser.role === 'PLATFORM_OWNER' ? 'Semua Usaha' : activeUser.role === 'OWNER' ? 'Aktivasi' : 'Dashboard')}
               type="button"
             >
               <svg aria-hidden="true" fill="none" viewBox="0 0 24 24"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" /></svg>
-              {canApproveSpk
+              {canManagePdi
+                ? priorityPdiCount > 0 && <span className="notification-count">{priorityPdiCount}</span>
+                : canApproveSpk
                 ? pendingApprovalCount > 0 && <span className="notification-count">{pendingApprovalCount}</span>
                 : unreadBillingNotifications.length > 0 && <span className="notification-dot" />}
             </button>}
@@ -4126,20 +4288,21 @@ function App() {
               <article className={`stat-card stat-${themeSettings.statCardStyle}`}><div className="stat-top"><span>Total pembayaran</span><span className="stat-icon purple">Rp</span></div><strong className="owner-revenue">{rupiah(platformData?.summary?.paidRevenue ?? 0)}</strong></article>
             </div>
             <section className="table-card full-table">
-              <div className="table-heading"><div><h2>Semua workspace</h2><p>{platformData?.businesses?.length ?? 0} usaha terdaftar</p></div></div>
-              <div className="table-scroll"><table><thead><tr><th>NAMA USAHA</th><th>PEMILIK</th><th>JENIS USAHA</th><th>PAKET / STATUS</th><th>MASA AKTIF</th><th>PEMBAYARAN</th><th>PENDAPATAN</th><th>KUOTA CABANG</th></tr></thead><tbody>
+              <div className="table-heading"><div><h2>Semua workspace</h2><p>{platformData?.businesses?.length ?? 0} usaha terdaftar</p><small>Pembayaran Midtrans tetap mengaktifkan paket otomatis sesuai pembayaran. Aktivasi manual tidak membuat transaksi pembayaran.</small></div></div>
+              <div className="table-scroll"><table><thead><tr><th>NAMA USAHA</th><th>PEMILIK</th><th>JENIS USAHA</th><th>PAKET / STATUS</th><th>MASA AKTIF</th><th>PEMBAYARAN</th><th>PENDAPATAN</th><th>KUOTA CABANG</th><th>AKTIVASI MANUAL</th></tr></thead><tbody>
                 {(platformData?.businesses ?? []).map((business) => <tr key={business.id}>
                   <td><strong>{business.name}</strong><small>{business.user_count} pengguna</small></td><td>{business.owner_email || '—'}</td><td>{business.business_type}</td>
                   <td><span className={`activation-status status-${business.status}`}>{business.status === 'trial' ? 'DEMO' : business.status.toUpperCase()}</span><small>{activationPlans.find((plan) => plan.id === business.plan_id)?.label || 'Uji coba'}</small></td>
                   <td>{business.status === 'lifetime' ? 'Selamanya' : new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium' }).format(new Date(business.active_until || business.trial_ends_at))}</td>
                   <td>{business.paid_order_count}</td><td className="amount">{rupiah(business.lifetime_revenue)}</td>
                   <td><div className="platform-branch-limit"><small>Aktif {business.active_branch_count} · kuota dasar {business.branch_limit} · tambahan {business.addon_branch_count}</small><div><input aria-label={`Batas cabang ${business.name}`} min="3" max="10000" onChange={(event) => setPlatformBranchLimits((current) => ({ ...current, [business.id]: event.target.value }))} type="number" value={platformBranchLimits[business.id] ?? business.branch_limit} /><button className="button button-quiet" disabled={platformBranchLimitSaving === business.id || !isAuthenticated} onClick={() => savePlatformBranchLimit(business)} type="button">{platformBranchLimitSaving === business.id ? '…' : 'Atur'}</button></div></div></td>
+                  <td><div className="platform-manual-activation"><select aria-label={`Paket aktivasi manual ${business.name}`} disabled={!isAuthenticated} onChange={(event) => setPlatformManualPlanSelections((current) => ({ ...current, [business.id]: event.target.value }))} value={platformManualPlanSelections[business.id] || 'year_1'}>{activationPlans.map((plan) => <option key={plan.id} value={plan.id}>{plan.label}</option>)}</select><button className="button button-quiet" disabled={!isAuthenticated || platformManualActivationSaving === business.id} onClick={() => manuallyActivatePlatformBusiness(business)} type="button">{platformManualActivationSaving === business.id ? '…' : 'Aktifkan'}</button></div></td>
                 </tr>)}
-                {!platformData?.businesses?.length && <tr><td colSpan="8">{isAuthenticated ? 'Belum ada usaha terdaftar.' : 'Masuk sebagai Owner KelolaUsaha.store untuk melihat data semua usaha.'}</td></tr>}
+                {!platformData?.businesses?.length && <tr><td colSpan="9">{isAuthenticated ? 'Belum ada usaha terdaftar.' : 'Masuk sebagai Owner KelolaUsaha.store untuk melihat data semua usaha.'}</td></tr>}
               </tbody></table></div>
             </section>
             <div className="support-owner-summary">
-              <section className="table-card"><div className="table-heading"><div><h2>Aktivitas workspace terbaru</h2><p>{platformData?.activity?.recentBusinesses?.length ?? 0} workspace terbaru</p></div></div><div className="table-scroll"><table><thead><tr><th>USAHA</th><th>JENIS</th><th>DIBUAT</th></tr></thead><tbody>{(platformData?.activity?.recentBusinesses ?? []).map((business) => <tr key={business.id}><td><strong>{business.name}</strong></td><td>{business.business_type}</td><td>{new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium' }).format(new Date(business.created_at))}</td></tr>)}</tbody></table></div></section>
+              <section className="table-card"><div className="table-heading"><div><h2>Aktivitas workspace terbaru</h2><p>{platformData?.activity?.recentBusinesses?.length ?? 0} workspace terbaru</p></div></div><div className="table-scroll"><table><thead><tr><th>USAHA</th><th>JENIS</th><th>WAKTU AKTIVASI</th><th>AKTIF SAMPAI</th></tr></thead><tbody>{(platformData?.activity?.recentBusinesses ?? []).map((business) => <tr key={business.id}><td><strong>{business.name}</strong></td><td>{business.business_type}</td><td>{formatWorkspaceDateTime(business.activated_at || business.created_at)}</td><td>{business.plan_id === 'lifetime' || business.subscription_status === 'lifetime' ? 'Selamanya' : formatWorkspaceDateTime(business.active_until || business.trial_ends_at)}</td></tr>)}</tbody></table></div></section>
               <section className="table-card"><div className="table-heading"><div><h2>Pembayaran terbaru</h2><p>{platformData?.activity?.recentPayments?.length ?? 0} transaksi terbaru</p></div></div><div className="table-scroll"><table><thead><tr><th>USAHA</th><th>PAKET</th><th>NILAI</th><th>STATUS</th></tr></thead><tbody>{(platformData?.activity?.recentPayments ?? []).map((payment) => <tr key={payment.id}><td><strong>{payment.business_name}</strong></td><td>{payment.plan_id}</td><td className="amount">{rupiah(payment.amount)}</td><td><span className={`activation-status status-${payment.status}`}>{payment.status}</span></td></tr>)}</tbody></table></div></section>
             </div>
             <p className="billing-copyright">© 2026 KelolaUsaha.store. Data rekap hanya tersedia untuk Owner platform.</p>
@@ -4509,13 +4672,16 @@ function App() {
             </div>
             <p className="pos-demo-note">Kwitansi motor dibuat otomatis saat SPK disubmit. Nota dan transaksi pada demo ini hanya tersedia selama sesi browser.</p>
           </section>
-        ) : ['Stok', 'Semua Unit', 'Unit Dealer', 'Motor', 'Unit & Motor'].includes(activePage) ? (
+        ) : activePage === 'PDI' || ['Stok', 'Semua Unit', 'Unit Dealer', 'Motor', 'Unit & Motor'].includes(activePage) ? (
           <DealerMotorWorkspace
             branches={workspaceBranches}
             canManage={isAuthenticated && activeUser.permissions.includes('unitManage')}
+            canInspectPdi={canManagePdi}
             intakes={dealerMotorIntakes}
             movements={dealerMotorMovements}
             notice={notice}
+            onUpdatePdi={updatePdi}
+            pdiOnly={activePage === 'PDI'}
             onCreate={async (unit) => {
               if (!isAuthenticated) throw new Error('Masuk ke workspace untuk menyimpan stok kendaraan.');
               const response = await fetch('/api/dealer-motor/units', {
@@ -4551,6 +4717,7 @@ function App() {
               setNotice('Identitas unit tercatat; unit kini tersedia untuk transaksi SPK.');
               return result.intake;
             }}
+            spks={spks}
             units={dealerMotorUnits}
           />
         ) : activePage === 'Pengiriman' ? (
@@ -4684,6 +4851,7 @@ function App() {
                   <td><span className={`user-status ${user.active ? 'enabled' : 'disabled'}`}><span />{user.approvalStatus === 'pending' ? 'Menunggu persetujuan' : user.active ? 'Aktif' : 'Nonaktif'}</span></td>
                   <td>{user.id !== activeUser.id && !['OWNER', 'PLATFORM_OWNER'].includes(user.role) && <button aria-label={`Atur akses ${user.name}`} className="button button-quiet access-edit-button" onClick={() => editUserAccess(user)} type="button">Atur akses</button>}</td>
                 </tr>)}
+                {!users.length && <tr><td colSpan="5">Belum ada pengguna workspace.</td></tr>}
               </tbody></table></div>
             </section>
             {accessDraft && <div className="access-modal-backdrop" onMouseDown={(event) => {
@@ -4721,7 +4889,9 @@ function App() {
         ) : activePage === 'User Management' ? (
           <section className="content">
             <div className="page-heading access-heading">
-              <div><div className="eyebrow">WORKSPACE <span>/</span> TIM USAHA</div><h1>Manajemen karyawan</h1><p>Bagikan link workspace {workspaceName} atau buat link pendaftaran khusus berdasarkan peran.</p></div>
+              <div><div className="eyebrow">WORKSPACE <span>/</span> TIM USAHA</div><h1>Manajemen karyawan</h1><p>{activeUser.role === 'HRD'
+                ? 'Direktori karyawan workspace, termasuk peran, status akun, dan cabang penempatan. Pengelolaan akses tetap dilakukan Owner.'
+                : `Bagikan link workspace ${workspaceName} atau buat link pendaftaran khusus berdasarkan peran.`}</p></div>
             </div>
             {notice && <div className="notice" role="status">{notice}</div>}
             {workspaceUrl && <label className="invite-link-field"><span>Link workspace untuk karyawan</span><input aria-label="Link workspace untuk karyawan" readOnly value={workspaceUrl} onFocus={(event) => event.target.select()} /></label>}
@@ -4736,18 +4906,20 @@ function App() {
               {inviteUrl && <label className="invite-link-field"><span>Link pendaftaran karyawan</span><input aria-label="Link pendaftaran karyawan" readOnly value={inviteUrl} onFocus={(event) => event.target.select()} /></label>}
             </section>}
             <section className="table-card access-table">
-              <div className="table-heading"><div><h2>Pengguna workspace</h2><p>{users.length} pengguna terdaftar</p></div></div>
-              <div className="table-scroll"><table><thead><tr><th>PENGGUNA</th><th>EMAIL</th><th>PERAN</th><th>STATUS</th><th /></tr></thead><tbody>
+              <div className="table-heading"><div><h2>Direktori karyawan</h2><p>{users.length} karyawan terdaftar</p></div></div>
+              <div className="table-scroll"><table><thead><tr><th>KARYAWAN</th><th>EMAIL</th><th>PERAN</th><th>CABANG</th><th>STATUS</th><th /></tr></thead><tbody>
                 {users.map((user) => <tr key={user.id}>
                   <td><div className="user-cell"><span className="user-avatar">{user.name.split(' ').map((part) => part[0]).slice(0, 2).join('')}</span><strong>{user.name}</strong></div></td>
                   <td>{user.email}</td>
                   <td><span className={`role-badge role-${user.role.toLowerCase().replaceAll(' ', '-')}`}>{user.role}</span></td>
+                  <td>{user.branchName || '—'}</td>
                   <td><span className={`user-status ${user.active ? 'enabled' : 'disabled'}`}><span />{user.approvalStatus === 'pending' ? 'Menunggu persetujuan' : user.active ? 'Aktif' : 'Nonaktif'}</span></td>
                   <td>{user.approvalStatus === 'pending' && ['OWNER', 'SUPER ADMIN'].includes(activeUser.role) && <>
                     <button className="button button-primary" disabled={memberDecisionBusy === user.id} onClick={() => decideTeamMember(user, 'approve')} type="button">Setujui</button>
                     <button className="button button-quiet" disabled={memberDecisionBusy === user.id} onClick={() => decideTeamMember(user, 'reject')} type="button">Tolak</button>
                   </>}</td>
                 </tr>)}
+                {!users.length && <tr><td colSpan="6">Belum ada karyawan terdaftar.</td></tr>}
               </tbody></table></div>
             </section>
           </section>
@@ -4768,17 +4940,18 @@ function App() {
                 {(businessTypes[businessType]?.modules || []).map(([id, label]) => {
                   const checked = workspaceModuleDraft.includes(id);
                   const required = id === 'dashboard'
-                    || (id === 'vehicles' && ['dealer_motor', 'dealer_vehicle'].includes(businessType));
+                    || (['vehicles', 'pdi', 'delivery'].includes(id)
+                      && ['dealer_motor', 'dealer_vehicle'].includes(businessType));
                   return <label className={`workspace-module-option ${checked ? 'is-selected' : ''}`} key={id}>
                     <input
                       checked={checked}
-                      disabled={id === 'dashboard'}
+                      disabled={required}
                       onChange={() => {
-                        if (id === 'vehicles' && required) {
+                        if (required) {
                           setWorkspaceModuleDraft((current) => (
                             current.includes(id) ? current : [...current, id]
                           ));
-                          setNotice('Data motor & stok unit aktif dan wajib untuk usaha dealer.');
+                          setNotice('Stok unit, PDI, dan pengiriman aktif dan wajib untuk alur dealer.');
                           return;
                         }
                         setWorkspaceModuleDraft((current) => (
@@ -4790,7 +4963,7 @@ function App() {
                     <span><strong>{label}</strong><small>{id === 'dashboard'
                       ? 'Wajib aktif untuk ringkasan workspace.'
                       : required
-                        ? 'Aktif dan wajib agar stok unit serta penerimaan kendaraan tampil.'
+                        ? 'Aktif dan wajib untuk alur stok, PDI, dan pengiriman dealer.'
                         : 'Tampilkan atau sembunyikan modul ini di navigasi tim.'}</small></span>
                   </label>;
                 })}
@@ -4825,7 +4998,9 @@ function App() {
             </section>}
 
             <div className="overview-banner">
-              <div className="banner-emblem">W</div>
+              <div className="banner-emblem">{workspaceLogoUrl
+                ? <img alt={`${workspaceName} logo`} src={workspaceLogoUrl} />
+                : initialsFor(workspaceName)}</div>
               <div className="banner-copy"><span>WORKSPACE USAHA</span><strong>{workspaceName}</strong><small>Satu dashboard untuk mengelola operasional dan performa tim Anda.</small></div>
               <div className="banner-date"><span>PERIODE AKTIF</span><strong>November 2026</strong><small>Hari ini, 20 November 2026</small></div>
               <div className="banner-decoration">WAM</div>
@@ -4851,6 +5026,35 @@ function App() {
               <section className="target-card"><div><div><h3>Target penjualan</h3><p>Progress dealer bulan ini</p></div><strong>68%</strong></div><div className="progress-track"><span /></div><small>34 dari 50 unit terjual</small></section>
             </div>
           </section>
+        ) : activePage === 'Target' && ['dealer_motor', 'dealer_vehicle'].includes(businessType) ? (
+          <DealerTargetsPage
+            branches={workspaceBranches}
+            canManage={activeUser.permissions.includes('targetManage')}
+            isAuthenticated={isAuthenticated}
+            spks={spks}
+          />
+        ) : activePage === 'Laporan Penjualan' && ['dealer_motor', 'dealer_vehicle'].includes(businessType) ? (
+          <DealerSalesReportPage
+            branches={workspaceBranches}
+            canViewAllBranches={activeUser.permissions.includes('branchManage')}
+            currentBranchId={workspaceBranches.length === 1 ? workspaceBranches[0].id : ''}
+            isAuthenticated={isAuthenticated}
+            spks={spks}
+          />
+        ) : activePage === 'Sales' && ['dealer_motor', 'dealer_vehicle'].includes(businessType) ? (
+          <DealerSalesTeamPage spks={spks} />
+        ) : activePage === 'Customer' && ['dealer_motor', 'dealer_vehicle'].includes(businessType) ? (
+          <DealerCustomersPage
+            customers={businessCustomers}
+            isAuthenticated={isAuthenticated}
+            onCustomerCreated={(customer) => setBusinessCustomers((current) => {
+              const identity = customer.phone?.trim();
+              const existingIndex = current.findIndex((item) => identity && item.phone?.trim() === identity);
+              if (existingIndex < 0) return [customer, ...current];
+              return current.map((item, index) => index === existingIndex ? { ...item, ...customer } : item);
+            })}
+            spks={spks}
+          />
         ) : (
           <section className="content">
             <div className="page-heading"><div><div className="eyebrow">MANAJEMEN DEALER <span>/</span> {heading.toUpperCase()}</div><h1>{heading}</h1><p>Kelola data dan aktivitas {heading.toLowerCase()} Dealer WAM.</p></div>{(heading === 'Semua SPK' || heading === 'SPK') && activeUser.permissions.includes('spkCreate') && <button className="button button-primary" onClick={beginNewSpk} type="button"><span className="plus">+</span> Buat SPK baru</button>}</div>
@@ -4875,6 +5079,17 @@ function App() {
                   {activeUser.permissions.includes('spkVerify') && item.status === 'SUBMITTED' && <button aria-label={`Tolak SPK ${item.spkNumber || item.id}`} className="button button-quiet" onClick={() => rejectSpk(item)} type="button">Tolak SPK</button>}
                   {activeUser.permissions.includes('spkApprove') && item.status === 'APPROVAL SVP' && <button aria-label={`Setujui SPK ${item.spkNumber || item.id}`} className="button button-primary" onClick={() => approveSpk(item)} type="button">Setujui SPK</button>}
                   {activeUser.permissions.includes('spkApprove') && item.status === 'APPROVAL SVP' && <button aria-label={`Tolak SPK ${item.spkNumber || item.id}`} className="button button-quiet" onClick={() => rejectSpk(item)} type="button">Tolak SPK</button>}
+                  {activeUser.permissions.includes('waybillManage')
+                    && item.status === 'DISETUJUI'
+                    && !item.waybillNumber
+                    && (item.pdiStatus === 'completed'
+                      ? <button
+                        aria-label={`Buat surat jalan ${item.spkNumber || item.id}`}
+                        className="button button-primary"
+                        onClick={() => void issueWaybill(item)}
+                        type="button"
+                      >Buat surat jalan</button>
+                      : <span className="document-share-unavailable">Menunggu PDI unit</span>)}
                   {activeUser.permissions.includes('deliveryScheduleManage')
                     && item.deliveryStatus === 'ready'
                     && item.waybillNumber

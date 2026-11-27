@@ -78,6 +78,64 @@ test('lets the owner open business profile management', async () => {
   expect(screen.getByLabelText('Logo usaha')).toBeDefined();
 });
 
+test('uses the updated business logo across workspace and dashboard branding', async () => {
+  localStorage.setItem('ku-demo-theme:dealer_motor', JSON.stringify({
+    logoUrl: '/uploads/company/business-logo-new.png',
+    dashboardLogoUrl: '/uploads/company/dashboard-logo-old.png',
+  }));
+  render(<App />);
+  openOwnerPreview();
+  fireEvent.change(screen.getByRole('combobox', { name: 'Pilih akun demo' }), {
+    target: { value: 'user-2' },
+  });
+
+  await waitFor(() => {
+    expect(document.querySelector('.brand-mark img')?.getAttribute('src'))
+      .toBe('/uploads/company/business-logo-new.png');
+    expect(document.querySelector('.dealer-switch .dealer-icon img')?.getAttribute('src'))
+      .toBe('/uploads/company/business-logo-new.png');
+    expect(document.querySelector('.overview-banner .banner-emblem img')?.getAttribute('src'))
+      .toBe('/uploads/company/business-logo-new.png');
+  });
+});
+
+test('opens distinct dealer target and sales report pages instead of the SPK fallback', () => {
+  render(<App />);
+  openOwnerPreview();
+  fireEvent.change(screen.getByRole('combobox', { name: 'Pilih akun demo' }), {
+    target: { value: 'user-2' },
+  });
+
+  fireEvent.click(screen.getByRole('button', { name: 'Target' }));
+  expect(screen.getByRole('heading', { name: 'Target Penjualan' })).toBeDefined();
+  expect(screen.getByRole('heading', { name: 'Atur target' })).toBeDefined();
+  expect(screen.queryByRole('heading', { name: 'Daftar SPK' })).toBeNull();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Laporan Penjualan' }));
+  expect(screen.getByRole('heading', { name: 'Laporan Penjualan' })).toBeDefined();
+  expect(screen.getByRole('heading', { name: 'Rekap per cabang' })).toBeDefined();
+  expect(screen.getByRole('heading', { name: 'Rekap per sales' })).toBeDefined();
+  expect(screen.queryByRole('heading', { name: 'Daftar SPK' })).toBeNull();
+});
+
+test('opens distinct dealer Sales and Customer pages instead of the SPK fallback', () => {
+  render(<App />);
+  openOwnerPreview();
+  fireEvent.change(screen.getByRole('combobox', { name: 'Pilih akun demo' }), {
+    target: { value: 'user-2' },
+  });
+
+  fireEvent.click(screen.getByRole('button', { name: 'Sales' }));
+  expect(screen.getByRole('heading', { name: 'Tim Sales' })).toBeDefined();
+  expect(screen.getByRole('heading', { name: 'Performa per sales' })).toBeDefined();
+  expect(screen.queryByRole('heading', { name: 'Daftar SPK' })).toBeNull();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Customer' }));
+  expect(screen.getByRole('heading', { name: 'Data Pelanggan' })).toBeDefined();
+  expect(screen.getByRole('heading', { name: 'Tambah pelanggan' })).toBeDefined();
+  expect(screen.queryByRole('heading', { name: 'Daftar SPK' })).toBeNull();
+});
+
 test('opens workspace settings from the active workspace and keeps dealer inventory enabled', () => {
   render(<App />);
   openOwnerPreview();
@@ -97,10 +155,10 @@ test('opens workspace settings from the active workspace and keeps dealer invent
   expect(screen.getByRole('heading', { name: 'Struktur Workspace' })).toBeDefined();
   const vehiclesModule = screen.getByRole('checkbox', { name: /Data motor & stok unit/ });
   expect(vehiclesModule.checked).toBe(true);
-  expect(vehiclesModule.disabled).toBe(false);
-  fireEvent.click(vehiclesModule);
+  expect(vehiclesModule.disabled).toBe(true);
   expect(vehiclesModule.checked).toBe(true);
-  expect(screen.getByRole('status').textContent).toContain('aktif dan wajib');
+  expect(vehiclesModule.parentElement.textContent)
+    .toContain('Aktif dan wajib untuk alur stok, PDI, dan pengiriman dealer.');
   fireEvent.click(screen.getByRole('button', { name: 'Pengaturan tema usaha' }));
   expect(screen.getByRole('heading', { name: 'Pengaturan Tampilan Dashboard' })).toBeDefined();
   expect(screen.getByRole('button', { name: 'Terapkan Tema' }).disabled).toBe(false);
@@ -115,6 +173,82 @@ test('grants SPV stock access and gives administrators delivery schedule permiss
   expect(spvPermissions).toContain('unitManage');
   expect(spvMenus.some(([label]) => label === 'Stok')).toBe(true);
   expect(getDefaultRolePermissions('ADMIN')).toContain('deliveryScheduleManage');
+  expect(getDefaultRolePermissions('ADMIN')).toContain('pdiManage');
+  expect(getDefaultRolePermissions('ADMIN')).toContain('waybillManage');
+  expect(getWorkspaceModulesForBusiness('dealer_motor', ['dashboard'])).toContain('pdi');
+});
+
+test('opens the PDI inspection queue from the notification bell', () => {
+  render(<App />);
+  openOwnerPreview();
+  fireEvent.change(screen.getByRole('combobox', { name: 'Pilih akun demo' }), {
+    target: { value: 'user-2' },
+  });
+
+  fireEvent.click(screen.getByRole('button', { name: 'Prioritas inspeksi PDI' }));
+
+  expect(screen.getByRole('heading', { name: 'Inspeksi unit (PDI)' })).toBeDefined();
+  expect(screen.getByRole('heading', { name: 'Antrean inspeksi PDI' })).toBeDefined();
+  expect(screen.getByRole('button', { name: 'Mulai inspeksi' })).toBeDefined();
+});
+
+test('shows the read-only employee directory to HRD', async () => {
+  const fetchMock = vi.fn(async (url) => {
+    if (url === '/api/auth/session') {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          user: {
+            id: 'hrd-user',
+            name: 'HRD Dealer',
+            email: 'hrd@dealer.test',
+            role: 'HRD',
+            permissions: getDefaultRolePermissions('HRD'),
+          },
+          business: {
+            id: 'dealer-company',
+            name: 'Dealer Contoh',
+            type: 'dealer_motor',
+            modules: ['dashboard', 'employees', 'vehicles', 'pdi', 'delivery'],
+            subscription: { status: 'active' },
+          },
+        }),
+      };
+    }
+    if (url === '/api/team/members') {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          users: [{
+            id: 'employee-1',
+            name: 'Sari Karyawan',
+            email: 'sari@dealer.test',
+            role: 'ADMIN',
+            active: true,
+            approvalStatus: 'approved',
+            branchName: 'Cabang Utama',
+          }],
+        }),
+      };
+    }
+    if (url === '/api/workspace/operations/branches') {
+      return { ok: true, status: 200, json: async () => ({ branches: [] }) };
+    }
+    return { ok: false, status: 404, json: async () => ({ message: 'Not found' }) };
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  render(<App />);
+
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/team/members'));
+  fireEvent.click(await screen.findByRole('button', { name: 'User Management' }));
+
+  expect(await screen.findByRole('heading', { name: 'Manajemen karyawan' })).toBeDefined();
+  expect(screen.getByText('Sari Karyawan')).toBeDefined();
+  expect(screen.getByText('Cabang Utama')).toBeDefined();
+  expect(screen.queryByRole('button', { name: /Buat link pendaftaran/ })).toBeNull();
+  expect(screen.getByText(/Pengelolaan akses tetap dilakukan Owner/)).toBeDefined();
 });
 
 test('opens POS settings from the workspace quick menu', () => {
@@ -503,6 +637,96 @@ test('restores a signed-in platform-owner session after returning from checkout'
   expect(fetchMock.mock.calls[0][0]).toBe('/api/auth/session');
   expect(fetchMock.mock.calls[1][0]).toBe('/api/platform/businesses');
   expect(screen.queryByRole('link', { name: 'Masuk' })).toBeNull();
+});
+
+test('shows activation dates and lets only the platform owner activate a workspace manually', async () => {
+  const companyId = '11111111-1111-4111-8111-111111111111';
+  const fetchMock = vi.fn(async (url, options) => {
+    if (url === '/api/auth/session') {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          user: { id: 'platform-owner', name: 'Owner Platform', email: 'owner@kelolausaha.store', role: 'PLATFORM_OWNER' },
+        }),
+      };
+    }
+    if (url === '/api/platform/businesses') {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          businesses: [{
+            id: companyId,
+            name: 'Dealer Contoh',
+            business_type: 'dealer_motor',
+            status: 'trial',
+            plan_id: null,
+            trial_ends_at: '2026-12-20T00:00:00Z',
+            user_count: 2,
+            active_branch_count: 1,
+            branch_limit: 3,
+            addon_branch_count: 0,
+            paid_order_count: 0,
+            lifetime_revenue: 0,
+          }],
+          summary: { total: 1, trials: 1, active: 0, paidRevenue: 0 },
+          activity: {
+            recentBusinesses: [{
+              id: companyId,
+              name: 'Dealer Contoh',
+              business_type: 'dealer_motor',
+              created_at: '2026-11-20T08:00:00Z',
+              activated_at: '2026-11-20T08:00:00Z',
+              active_until: null,
+              trial_ends_at: '2026-12-20T00:00:00Z',
+              plan_id: null,
+              subscription_status: 'trial',
+            }],
+            recentPayments: [],
+          },
+        }),
+      };
+    }
+    if (url === `/api/platform/businesses/${companyId}/manual-activation`) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          business: {
+            id: companyId,
+            planId: 'month_1',
+            status: 'active',
+            activatedAt: '2026-11-23T12:00:00Z',
+            activeUntil: '2026-12-23T12:00:00Z',
+          },
+        }),
+      };
+    }
+    return { ok: false, status: 404, json: async () => ({ message: 'Not found' }) };
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  render(<App />);
+
+  expect(await screen.findByRole('heading', { name: 'Rekap semua usaha' })).toBeDefined();
+  expect(screen.getByRole('heading', { name: 'Aktivitas workspace terbaru' })).toBeDefined();
+  expect(screen.getByText('WAKTU AKTIVASI')).toBeDefined();
+  expect(screen.getByText('AKTIF SAMPAI')).toBeDefined();
+  expect(screen.getByText(/Pembayaran Midtrans tetap mengaktifkan paket otomatis sesuai pembayaran/)).toBeDefined();
+
+  fireEvent.change(await screen.findByRole('combobox', { name: 'Paket aktivasi manual Dealer Contoh' }), {
+    target: { value: 'month_1' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Aktifkan' }));
+
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+    `/api/platform/businesses/${companyId}/manual-activation`,
+    expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({ planId: 'month_1' }),
+    }),
+  ));
+  expect(await screen.findByRole('status')).toBeDefined();
 });
 
 test('opens account profile and logs out from the account menu', async () => {

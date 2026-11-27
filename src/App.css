@@ -44,6 +44,7 @@ button.dealer-switch { color: inherit; font: inherit; text-align: left; cursor: 
 button.dealer-switch:hover { border-color: #e7c7cb; box-shadow: 0 3px 12px #a8233212; }
 button.dealer-switch:focus-visible { outline: 2px solid var(--theme-primary, #bd2635); outline-offset: 2px; }
 .dealer-icon { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 7px; color: #c52f3e; background: #ffe9eb; font-size: 14px; font-weight: 800; }
+.dealer-icon img, .banner-emblem img { width: 100%; height: 100%; border-radius: inherit; object-fit: contain; }
 .dealer-copy, .profile-copy { display: flex; flex: 1; flex-direction: column; gap: 4px; min-width: 0; }
 .dealer-copy strong { color: #343c46; font-size: 12px; font-weight: 600; }
 .dealer-copy small { color: #9299a2; font-size: 10px; }
@@ -616,6 +617,9 @@ td .spk-id { color: #316d50; font-size: 9px; }
 .platform-branch-limit > small { color: var(--muted); font-size: 10px; white-space: nowrap; }
 .platform-branch-limit > div { display: flex; gap: 6px; }
 .platform-branch-limit input { width: 82px; min-width: 0; padding: 6px; border: 1px solid var(--border); border-radius: 6px; }
+.platform-manual-activation { display: grid; min-width: 150px; gap: 6px; }
+.platform-manual-activation select { min-width: 140px; padding: 6px; border: 1px solid var(--border); border-radius: 6px; }
+.platform-manual-activation .button { justify-self: start; min-height: 28px; padding: 0 9px; font-size: 9px; }
 
 @media (max-width: 900px) {
   .attendance-request-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -951,6 +955,12 @@ td .spk-id { color: #316d50; font-size: 9px; }
 .spk-actions { min-width: 240px; }
 .spk-document-actions { margin-bottom: 8px; }
 .spk-actions > .button { margin: 3px 4px 3px 0; }
+.pdi-status-cell { min-width: 190px; }
+.pdi-status-cell > strong { display: block; margin: 4px 0 7px; color: #43544a; font-size: 10px; }
+.pdi-priority { display: inline-flex; padding: 4px 6px; border-radius: 4px; color: #825314; background: #fff3da; font-size: 8px; font-weight: 700; }
+.pdi-action { display: grid; gap: 6px; }
+.pdi-action input { min-width: 170px; height: 30px; padding: 0 8px; font-size: 9px; }
+.pdi-action .button, .pdi-status-cell > .button { min-height: 28px; padding: 0 8px; font-size: 9px; }
 .delivery-schedule-form { display: grid; justify-items: start; gap: 7px; margin: 8px 0; }
 .delivery-schedule-form .field { width: min(100%, 260px); }
 .delivery-schedule-history { margin-top: 7px; color: #59645d; font-size: 10px; }

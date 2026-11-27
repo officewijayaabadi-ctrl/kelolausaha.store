@@ -209,6 +209,7 @@ function shapeSpk(row) {
     deliveryScheduledAt: row.deliveryScheduledAt,
     deliveryScheduleHistory: row.deliveryScheduleHistory || [],
     deliveryStatus: row.deliveryStatus,
+    pdiStatus: row.pdiStatus,
     driverId: row.driverId,
     driverName: row.driverName,
     deliveryLatitude: row.deliveryLatitude,
@@ -263,7 +264,7 @@ export function createDealerMotorRouter({
     });
 
   router.get('/units', authenticate, requireTenant, requireActiveTenant,
-    requirePermission('unitManage', 'spkCreate'), async (req, res, next) => {
+    requirePermission('unitManage', 'spkCreate', 'pdiManage'), async (req, res, next) => {
       try {
         const canViewAllBranches = req.user.permissions.includes('unitManage');
         const result = await pool.query(
@@ -280,10 +281,20 @@ export function createDealerMotorRouter({
                   u.scratch_status AS "scratchStatus",
                   u.pdi_status AS "pdiStatus",
                   u.handover_status AS "handoverStatus",
+                  active_spk.spk_number AS "spkNumber",
+                  active_spk.status AS "spkStatus",
                   to_char(u.stock_entry_date, 'YYYY-MM-DD') AS "stockEntryDate",
                   u.status_updated_at AS "statusUpdatedAt", u.created_at AS "createdAt"
            FROM dealer_motor_units u
            JOIN business_branches b ON b.id = u.branch_id AND b.company_id = u.company_id
+           LEFT JOIN LATERAL (
+             SELECT s.spk_number, s.status
+             FROM dealer_motor_spks s
+             WHERE s.company_id = u.company_id AND s.unit_id = u.id
+               AND s.status IN ('SUBMITTED', 'APPROVAL SVP', 'DISETUJUI')
+             ORDER BY s.created_at DESC
+             LIMIT 1
+           ) active_spk ON true
            WHERE u.company_id = $1 AND ($2::boolean OR u.branch_id = $3)
            ORDER BY u.created_at DESC LIMIT 1000`,
           [req.user.company_id, canViewAllBranches, req.user.branch_id],
@@ -366,6 +377,70 @@ export function createDealerMotorRouter({
           movements: movementRows,
         });
       } catch (error) {
+        next(error);
+      }
+    });
+
+  router.patch('/units/:id/pdi', authenticate, requireTenant, requireActiveTenant,
+    requirePermission('pdiManage'), async (req, res, next) => {
+      if (!uuidPattern.test(req.params.id)) return res.status(400).json({ message: 'Unit tidak valid.' });
+      const { action } = req.body || {};
+      if (!['start', 'complete'].includes(action)) {
+        return res.status(400).json({ message: 'Tindakan PDI tidak valid.' });
+      }
+      const note = typeof req.body.note === 'string' ? req.body.note.trim() : '';
+      if (note.length > 500) return res.status(400).json({ message: 'Catatan PDI maksimal 500 karakter.' });
+      try {
+        const unit = await withTransaction(pool, async (client) => {
+          const canViewAllBranches = req.user.permissions.includes('unitManage')
+            || req.user.permissions.includes('branchManage');
+          const current = await client.query(
+            `SELECT id, branch_id AS "branchId", stock_status AS "stockStatus",
+                    pdi_status AS "pdiStatus"
+             FROM dealer_motor_units
+             WHERE id = $1 AND company_id = $2 AND ($3::boolean OR branch_id = $4)
+             FOR UPDATE`,
+            [req.params.id, req.user.company_id, canViewAllBranches, req.user.branch_id],
+          );
+          if (!current.rowCount) throw invalid('Unit tidak ditemukan atau di luar cabang Anda.', 404);
+          const existing = current.rows[0];
+          const allowedStockStatuses = ['available', 'reserved', 'approved_for_delivery'];
+          if (!allowedStockStatuses.includes(existing.stockStatus)) {
+            throw invalid('PDI hanya dapat dilakukan pada unit stok yang belum dikirim.', 409);
+          }
+          if (action === 'start' && existing.pdiStatus !== 'pending') {
+            throw invalid('PDI hanya dapat dimulai dari status menunggu.', 409);
+          }
+          if (action === 'complete' && existing.pdiStatus !== 'in_progress') {
+            throw invalid('Mulai PDI sebelum menyelesaikan inspeksi.', 409);
+          }
+          const nextStatus = action === 'start' ? 'in_progress' : 'completed';
+          const updated = await client.query(
+            `UPDATE dealer_motor_units
+             SET pdi_status = $1, status_updated_at = now(), updated_at = now()
+             WHERE id = $2 AND company_id = $3
+             RETURNING id, branch_id AS "branchId", stock_status AS "stockStatus",
+                       pdi_status AS "pdiStatus"`,
+            [nextStatus, req.params.id, req.user.company_id],
+          );
+          await client.query(
+            `INSERT INTO dealer_motor_unit_events
+               (company_id, unit_id, created_by, event_type, note, details)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [
+              req.user.company_id,
+              req.params.id,
+              req.user.id,
+              action === 'start' ? 'pdi_started' : 'pdi_completed',
+              action === 'start' ? 'PDI dimulai' : (note || 'PDI selesai'),
+              JSON.stringify(note ? { note } : {}),
+            ],
+          );
+          return updated.rows[0];
+        });
+        res.json({ unit });
+      } catch (error) {
+        if (error.status) return res.status(error.status).json({ message: error.message });
         next(error);
       }
     });
@@ -592,6 +667,7 @@ export function createDealerMotorRouter({
                 s.delivery_status AS "deliveryStatus", s.driver_id AS "driverId",
                 s.waybill_number AS "waybillNumber", s.waybill_issued_at AS "waybillIssuedAt",
                 s.delivery_scheduled_at AS "deliveryScheduledAt",
+                u.pdi_status AS "pdiStatus",
                 COALESCE((
                   SELECT jsonb_agg(jsonb_build_object(
                     'previousScheduledAt', h.previous_scheduled_at,
@@ -622,6 +698,248 @@ export function createDealerMotorRouter({
       next(error);
     }
   });
+
+  router.get('/sales-targets', authenticate, requireTenant, requireActiveTenant,
+    requirePermission('targetManage'), async (req, res, next) => {
+      const month = String(req.query.month || '');
+      const periodStart = `${month}-01`;
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || !validDate(periodStart)) {
+        return res.status(400).json({ message: 'Periode target tidak valid.' });
+      }
+      const canViewAllBranches = req.user.permissions.includes('branchManage');
+      try {
+        const [targets, salespeople] = await Promise.all([
+          pool.query(
+            `SELECT t.id, to_char(t.period_start, 'YYYY-MM') AS month,
+                    t.scope_type AS "scopeType", t.branch_id AS "branchId",
+                    b.name AS "branchName", t.sales_name AS "salesName",
+                    t.unit_target AS "unitTarget", t.revenue_target AS "revenueTarget",
+                    COALESCE(actual.unit_count, 0)::int AS "actualUnitCount",
+                    COALESCE(actual.revenue, 0)::text AS "actualRevenue"
+             FROM dealer_motor_sales_targets t
+             LEFT JOIN business_branches b
+               ON b.id = t.branch_id AND b.company_id = t.company_id
+             LEFT JOIN LATERAL (
+               SELECT COUNT(*)::int AS unit_count, COALESCE(SUM(s.amount), 0) AS revenue
+               FROM dealer_motor_spks s
+               WHERE s.company_id = t.company_id
+                 AND s.status IN ('DISETUJUI', 'DALAM PENGIRIMAN', 'SELESAI')
+                 AND s.created_at >= (t.period_start::timestamp AT TIME ZONE 'Asia/Jakarta')
+                 AND s.created_at < ((t.period_start + interval '1 month')::timestamp
+                                     AT TIME ZONE 'Asia/Jakarta')
+                 AND (t.branch_id IS NULL OR s.branch_id = t.branch_id)
+                 AND ($3::boolean OR s.branch_id = $4)
+                 AND (t.sales_name IS NULL OR lower(btrim(s.sales_name)) = lower(btrim(t.sales_name)))
+             ) actual ON true
+             WHERE t.company_id = $1 AND t.period_start = $2::date
+               AND ($3::boolean OR t.branch_id IS NULL OR t.branch_id = $4)
+             ORDER BY t.scope_type, b.name NULLS FIRST, t.sales_name NULLS FIRST`,
+            [req.user.company_id, periodStart, canViewAllBranches, req.user.branch_id],
+          ),
+          pool.query(
+            `SELECT DISTINCT s.sales_name AS name
+             FROM dealer_motor_spks s
+             WHERE s.company_id = $1 AND ($2::boolean OR s.branch_id = $3)
+             ORDER BY s.sales_name`,
+            [req.user.company_id, canViewAllBranches, req.user.branch_id],
+          ),
+        ]);
+        res.json({ month, targets: targets.rows, salespeople: salespeople.rows.map((row) => row.name) });
+      } catch (error) {
+        next(error);
+      }
+    });
+
+  router.put('/sales-targets', authenticate, requireTenant, requireActiveTenant,
+    requirePermission('targetManage'), async (req, res, next) => {
+      const {
+        month,
+        scopeType,
+        branchId: requestedBranchId,
+        salesName: requestedSalesName,
+        unitTarget: rawUnitTarget,
+        revenueTarget: rawRevenueTarget,
+      } = req.body || {};
+      const periodStart = `${String(month || '')}-01`;
+      const validScopeTypes = ['company', 'branch', 'salesperson', 'branch_salesperson'];
+      const needsBranch = ['branch', 'branch_salesperson'].includes(scopeType);
+      const needsSalesperson = ['salesperson', 'branch_salesperson'].includes(scopeType);
+      const branchId = needsBranch ? String(requestedBranchId || '') : null;
+      const salesName = needsSalesperson
+        ? (typeof requestedSalesName === 'string' ? requestedSalesName.trim() : '')
+        : null;
+      const unitTarget = Number(rawUnitTarget);
+      const revenueTarget = Number(rawRevenueTarget);
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(month || ''))
+        || !validDate(periodStart)
+        || !validScopeTypes.includes(scopeType)
+        || (needsBranch && !uuidPattern.test(branchId))
+        || (needsSalesperson && (!salesName || salesName.length > 160))
+        || !Number.isSafeInteger(unitTarget) || unitTarget < 0
+        || !Number.isSafeInteger(revenueTarget) || revenueTarget < 0) {
+        return res.status(400).json({ message: 'Data target penjualan tidak valid.' });
+      }
+      const canManageAllBranches = req.user.permissions.includes('branchManage');
+      if (!canManageAllBranches && ['company', 'salesperson'].includes(scopeType)) {
+        return res.status(403).json({ message: 'Cakupan target seluruh perusahaan hanya dapat diatur pengelola workspace.' });
+      }
+      if (branchId && !canManageAllBranches && branchId !== req.user.branch_id) {
+        return res.status(403).json({ message: 'Anda hanya dapat mengatur target cabang sendiri.' });
+      }
+      try {
+        if (branchId) {
+          const branch = await pool.query(
+            'SELECT id FROM business_branches WHERE id = $1 AND company_id = $2',
+            [branchId, req.user.company_id],
+          );
+          if (!branch.rowCount) return res.status(404).json({ message: 'Cabang tidak ditemukan di workspace ini.' });
+        }
+        const scopeKey = scopeType === 'company'
+          ? 'company'
+          : scopeType === 'branch'
+            ? `branch:${branchId}`
+            : scopeType === 'salesperson'
+              ? `sales:${salesName.toLowerCase()}`
+              : `branch:${branchId}:sales:${salesName.toLowerCase()}`;
+        const result = await pool.query(
+          `INSERT INTO dealer_motor_sales_targets
+             (company_id, period_start, scope_type, scope_key, branch_id, sales_name,
+              unit_target, revenue_target, created_by, updated_by)
+           VALUES ($1, $2::date, $3, $4, $5, $6, $7, $8, $9, $9)
+           ON CONFLICT (company_id, period_start, scope_key)
+           DO UPDATE SET scope_type = EXCLUDED.scope_type,
+                         branch_id = EXCLUDED.branch_id,
+                         sales_name = EXCLUDED.sales_name,
+                         unit_target = EXCLUDED.unit_target,
+                         revenue_target = EXCLUDED.revenue_target,
+                         updated_by = EXCLUDED.updated_by,
+                         updated_at = now()
+           RETURNING id`,
+          [
+            req.user.company_id, periodStart, scopeType, scopeKey, branchId, salesName,
+            unitTarget, revenueTarget, req.user.id,
+          ],
+        );
+        res.json({ id: result.rows[0].id, month, scopeType, branchId, salesName, unitTarget, revenueTarget });
+      } catch (error) {
+        next(error);
+      }
+    });
+
+  router.get('/sales-report', authenticate, requireTenant, requireActiveTenant,
+    requirePermission('reportsView'), async (req, res, next) => {
+      const from = String(req.query.from || '');
+      const to = String(req.query.to || '');
+      const requestedBranchId = String(req.query.branchId || '');
+      if (!validDate(from) || !validDate(to) || from > to) {
+        return res.status(400).json({ message: 'Rentang tanggal laporan tidak valid.' });
+      }
+      if (requestedBranchId && !uuidPattern.test(requestedBranchId)) {
+        return res.status(400).json({ message: 'Filter cabang tidak valid.' });
+      }
+      const canViewAllBranches = req.user.permissions.includes('branchManage');
+      if (!canViewAllBranches && !req.user.branch_id) {
+        return res.status(403).json({ message: 'Akun ini belum memiliki cabang untuk melihat laporan.' });
+      }
+      if (!canViewAllBranches && requestedBranchId && requestedBranchId !== req.user.branch_id) {
+        return res.status(403).json({ message: 'Anda hanya dapat melihat laporan cabang sendiri.' });
+      }
+      const branchId = canViewAllBranches ? (requestedBranchId || null) : req.user.branch_id;
+      try {
+        if (requestedBranchId) {
+          const branch = await pool.query(
+            'SELECT id FROM business_branches WHERE id = $1 AND company_id = $2',
+            [requestedBranchId, req.user.company_id],
+          );
+          if (!branch.rowCount) return res.status(404).json({ message: 'Cabang tidak ditemukan di workspace ini.' });
+        }
+        const params = [req.user.company_id, from, to, branchId];
+        const dateBounds = `s.created_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Jakarta')
+          AND s.created_at < (($3::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta')
+          AND ($4::uuid IS NULL OR s.branch_id = $4)`;
+        const [summary, daily, branches, salespeople, records] = await Promise.all([
+          pool.query(
+            `SELECT COUNT(*)::int AS "spkCount",
+                    COUNT(*) FILTER (WHERE s.status IN ('DISETUJUI', 'DALAM PENGIRIMAN', 'SELESAI'))::int
+                      AS "salesCount",
+                    COALESCE(SUM(s.amount) FILTER (
+                      WHERE s.status IN ('DISETUJUI', 'DALAM PENGIRIMAN', 'SELESAI')), 0)::text AS revenue,
+                    COUNT(*) FILTER (WHERE s.status = 'SELESAI')::int AS "deliveredCount",
+                    COUNT(*) FILTER (WHERE s.status = 'DITOLAK')::int AS "rejectedCount",
+                    COUNT(*) FILTER (WHERE s.status IN ('SUBMITTED', 'APPROVAL SVP'))::int AS "pendingCount"
+             FROM dealer_motor_spks s
+             WHERE s.company_id = $1 AND ${dateBounds}`,
+            params,
+          ),
+          pool.query(
+            `SELECT to_char(s.created_at AT TIME ZONE 'Asia/Jakarta', 'YYYY-MM-DD') AS date,
+                    COUNT(*)::int AS "spkCount",
+                    COUNT(*) FILTER (WHERE s.status IN ('DISETUJUI', 'DALAM PENGIRIMAN', 'SELESAI'))::int
+                      AS "salesCount",
+                    COALESCE(SUM(s.amount) FILTER (
+                      WHERE s.status IN ('DISETUJUI', 'DALAM PENGIRIMAN', 'SELESAI')), 0)::text AS revenue
+             FROM dealer_motor_spks s
+             WHERE s.company_id = $1 AND ${dateBounds}
+             GROUP BY date ORDER BY date`,
+            params,
+          ),
+          pool.query(
+            `SELECT s.branch_id AS "branchId", b.name AS "branchName",
+                    COUNT(*)::int AS "spkCount",
+                    COUNT(*) FILTER (WHERE s.status IN ('DISETUJUI', 'DALAM PENGIRIMAN', 'SELESAI'))::int
+                      AS "salesCount",
+                    COALESCE(SUM(s.amount) FILTER (
+                      WHERE s.status IN ('DISETUJUI', 'DALAM PENGIRIMAN', 'SELESAI')), 0)::text AS revenue
+             FROM dealer_motor_spks s
+             JOIN business_branches b ON b.id = s.branch_id AND b.company_id = s.company_id
+             WHERE s.company_id = $1 AND ${dateBounds}
+             GROUP BY s.branch_id, b.name
+             ORDER BY COALESCE(SUM(s.amount) FILTER (
+               WHERE s.status IN ('DISETUJUI', 'DALAM PENGIRIMAN', 'SELESAI')), 0) DESC, b.name`,
+            params,
+          ),
+          pool.query(
+            `SELECT s.sales_name AS "salesName", s.branch_id AS "branchId", b.name AS "branchName",
+                    COUNT(*)::int AS "spkCount",
+                    COUNT(*) FILTER (WHERE s.status IN ('DISETUJUI', 'DALAM PENGIRIMAN', 'SELESAI'))::int
+                      AS "salesCount",
+                    COALESCE(SUM(s.amount) FILTER (
+                      WHERE s.status IN ('DISETUJUI', 'DALAM PENGIRIMAN', 'SELESAI')), 0)::text AS revenue
+             FROM dealer_motor_spks s
+             JOIN business_branches b ON b.id = s.branch_id AND b.company_id = s.company_id
+             WHERE s.company_id = $1 AND ${dateBounds}
+             GROUP BY s.sales_name, s.branch_id, b.name
+             ORDER BY COALESCE(SUM(s.amount) FILTER (
+               WHERE s.status IN ('DISETUJUI', 'DALAM PENGIRIMAN', 'SELESAI')), 0) DESC, s.sales_name`,
+            params,
+          ),
+          pool.query(
+            `SELECT s.id, s.spk_number AS "spkNumber", s.customer_name AS "customerName",
+                    s.sales_name AS "salesName", s.status, s.amount,
+                    to_char(s.created_at AT TIME ZONE 'Asia/Jakarta', 'YYYY-MM-DD') AS date,
+                    b.name AS "branchName", u.brand, u.model, u.specification
+             FROM dealer_motor_spks s
+             JOIN business_branches b ON b.id = s.branch_id AND b.company_id = s.company_id
+             JOIN dealer_motor_units u ON u.id = s.unit_id AND u.company_id = s.company_id
+             WHERE s.company_id = $1 AND ${dateBounds}
+             ORDER BY s.created_at DESC, s.id DESC LIMIT 1000`,
+            params,
+          ),
+        ]);
+        res.json({
+          from,
+          to,
+          branchId,
+          summary: summary.rows[0],
+          daily: daily.rows,
+          branches: branches.rows,
+          salespeople: salespeople.rows,
+          records: records.rows,
+        });
+      } catch (error) {
+        next(error);
+      }
+    });
 
   router.post('/spks', authenticate, requireTenant, requireActiveTenant,
     requirePermission('spkCreate'), async (req, res, next) => {
@@ -831,9 +1149,7 @@ export function createDealerMotorRouter({
           if (!updatedUnit.rowCount) throw invalid('Unit motor sudah berubah status.', 409);
           const waybill = await client.query(
             `UPDATE dealer_motor_spks
-             SET status = 'DISETUJUI', delivery_status = 'ready',
-                 approved_by = $1, waybill_number = 'SJ-' || substring(spk_number FROM 5),
-                 waybill_issued_at = now(), waybill_issued_by = $1, updated_at = now()
+             SET status = 'DISETUJUI', approved_by = $1, updated_at = now()
              WHERE id = $2 AND company_id = $3
              RETURNING waybill_number AS "waybillNumber",
                        waybill_issued_at AS "waybillIssuedAt",
@@ -856,6 +1172,55 @@ export function createDealerMotorRouter({
           };
         });
         res.json({ spk: result });
+      } catch (error) {
+        if (error.status) return res.status(error.status).json({ message: error.message });
+        next(error);
+      }
+    });
+
+  router.post('/spks/:id/waybill', authenticate, requireTenant, requireActiveTenant,
+    requirePermission('waybillManage'), async (req, res, next) => {
+      if (!uuidPattern.test(req.params.id)) return res.status(400).json({ message: 'SPK tidak valid.' });
+      try {
+        const spk = await withTransaction(pool, async (client) => {
+          const canViewAllBranches = req.user.permissions.includes('unitManage')
+            || req.user.permissions.includes('branchManage');
+          const current = await client.query(
+            `SELECT s.id, s.spk_number AS "spkNumber", s.status, s.waybill_number AS "waybillNumber",
+                    u.pdi_status AS "pdiStatus"
+             FROM dealer_motor_spks s
+             JOIN dealer_motor_units u ON u.id = s.unit_id AND u.company_id = s.company_id
+             WHERE s.id = $1 AND s.company_id = $2
+               AND ($3::boolean OR s.branch_id = $4)
+             FOR UPDATE OF s, u`,
+            [req.params.id, req.user.company_id, canViewAllBranches, req.user.branch_id],
+          );
+          if (!current.rowCount) throw invalid('SPK tidak ditemukan atau di luar cabang Anda.', 404);
+          const row = current.rows[0];
+          if (row.status !== 'DISETUJUI') {
+            throw invalid('Surat jalan hanya dapat dibuat setelah SPK disetujui.', 409);
+          }
+          if (row.pdiStatus !== 'completed') {
+            throw invalid('Selesaikan inspeksi PDI unit sebelum membuat surat jalan.', 409);
+          }
+          if (row.waybillNumber) throw invalid('Surat jalan untuk SPK ini sudah dibuat.', 409);
+          const updated = await client.query(
+            `UPDATE dealer_motor_spks
+             SET delivery_status = 'ready',
+                 waybill_number = 'SJ-' || substring(spk_number FROM 5),
+                 waybill_issued_at = now(), waybill_issued_by = $1, updated_at = now()
+             WHERE id = $2 AND company_id = $3
+               AND status = 'DISETUJUI' AND waybill_number IS NULL
+             RETURNING id, spk_number AS "spkNumber", status,
+                       delivery_status AS "deliveryStatus",
+                       waybill_number AS "waybillNumber",
+                       waybill_issued_at AS "waybillIssuedAt"`,
+            [req.user.id, req.params.id, req.user.company_id],
+          );
+          if (!updated.rowCount) throw invalid('SPK sudah berubah atau surat jalan telah dibuat.', 409);
+          return { ...updated.rows[0], pdiStatus: row.pdiStatus };
+        });
+        res.json({ spk });
       } catch (error) {
         if (error.status) return res.status(error.status).json({ message: error.message });
         next(error);
