@@ -79,6 +79,9 @@ test('opens workspace settings from the active workspace and keeps dealer invent
   fireEvent.change(screen.getByRole('combobox', { name: 'Pilih akun demo' }), {
     target: { value: 'user-2' },
   });
+  expect(screen.getByRole('button', { name: 'Stok' })).toBeDefined();
+  fireEvent.click(screen.getByRole('button', { name: 'Stok' }));
+  expect(screen.getByRole('heading', { name: 'Stok unit motor' })).toBeDefined();
   fireEvent.click(screen.getByRole('button', { name: 'Buka pengaturan workspace' }));
 
   expect(screen.getByRole('heading', { name: 'Struktur Workspace' })).toBeDefined();
@@ -619,6 +622,7 @@ test('verifies email first, then creates a business with its selected modules', 
   expect(screen.getByRole('button', { name: 'Pembukuan' })).toBeDefined();
   expect(screen.getByRole('button', { name: 'Pengelolaan Akses' })).toBeDefined();
   expect(screen.getByRole('button', { name: 'Kasir Toko' })).toBeDefined();
+  expect(screen.queryByRole('button', { name: 'Stok' })).toBeNull();
   expect(screen.queryByRole('button', { name: 'Semua Unit' })).toBeNull();
   expect(screen.queryByRole('button', { name: 'Input SPK' })).toBeNull();
   const verifyCall = fetchMock.mock.calls.find(([url]) => url === '/api/auth/verify-otp');

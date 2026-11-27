@@ -72,7 +72,7 @@ const roleMenus = {
     ['Nota Digital', '▧'],
     ['Menu Digital', '☷'],
     ['Pesanan', '☷'],
-    ['Semua Unit', '⌂'],
+    ['Stok', '⌂'],
     ['Semua SPK', '▤'],
     ['Laporan Penjualan', '▥'],
     ['Target', '◎'],
@@ -83,7 +83,7 @@ const roleMenus = {
   SVP: [
     ['Dashboard', '▦'],
     ['Absensi', '◷'],
-    ['Unit Dealer', '⌂'],
+    ['Stok', '⌂'],
     ['Sales', '♙'],
     ['SPK', '▤'],
     ['Approval', '✓'],
@@ -101,7 +101,7 @@ const roleMenus = {
     ['Input SPK', '+'],
     ['Customer', '♙'],
     ['Sales', '♧'],
-    ['Motor', '⌂'],
+    ['Stok', '⌂'],
     ['Leasing', '▣'],
     ['Dokumen', '▤'],
     ['Verifikasi SPK', '✓'],
@@ -210,7 +210,7 @@ const extraPermissionMenus = [
   ['Approval', '✓', 'spkApprove'],
   ['Customer', '♙', 'customerManage'],
   ['Sales', '♧', 'salesManage'],
-  ['Unit & Motor', '⌂', 'unitManage'],
+  ['Stok', '⌂', 'unitManage'],
   ['Pengiriman', '↗', 'deliveryManage'],
   ['Leasing & Promo', '▣', 'leasingManage'],
   ['Laporan Penjualan', '▥', 'reportsView'],
@@ -234,7 +234,7 @@ function menuPermission(label) {
   if (label === 'Input SPK') return 'spkCreate';
   if (['Semua SPK', 'SPK'].includes(label)) return 'spkViewAll';
   if (['SPK Saya', 'Pengajuan', 'Follow Up'].includes(label)) return 'spkViewOwn';
-  if (['Semua Unit', 'Unit Dealer', 'Motor', 'Unit & Motor'].includes(label)) return 'unitManage';
+  if (['Stok', 'Semua Unit', 'Unit Dealer', 'Motor', 'Unit & Motor'].includes(label)) return 'unitManage';
   if (label === 'Pengiriman') return 'deliveryManage';
   if (['Laporan Penjualan', 'Performance'].includes(label)) return 'reportsView';
   if (label === 'Target') return 'targetManage';
@@ -306,7 +306,7 @@ const businessMenuLabels = {
 const dealerOnlyMenus = new Set([
   'Input SPK', 'Semua SPK', 'SPK', 'SPK Saya', 'Pengajuan', 'Follow Up',
   'Verifikasi SPK', 'Approval', 'Sales', 'Motor', 'Leasing', 'Leasing & Promo',
-  'Dokumen', 'Pengiriman', 'Performance', 'Semua Unit', 'Unit Dealer', 'Unit & Motor', 'Target',
+  'Dokumen', 'Pengiriman', 'Performance', 'Stok', 'Semua Unit', 'Unit Dealer', 'Unit & Motor', 'Target',
 ]);
 
 const initialUsers = [
@@ -2340,6 +2340,7 @@ function App() {
     'Laporan Penjualan': 'sales_reports',
     Performance: 'sales_reports',
     Target: 'targets',
+    Stok: 'vehicles',
     'Semua Unit': 'vehicles',
     'Unit Dealer': 'vehicles',
     'Unit & Motor': 'vehicles',
@@ -2366,7 +2367,7 @@ function App() {
     { title: 'UTAMA', labels: ['Dashboard'] },
     { title: 'OPERASIONAL', labels: ['Kasir', 'Menu Digital', 'Pesanan', 'Daftar Harga', 'Transaksi', 'Nota Digital', 'Aktivasi', 'Input SPK', 'SPK', 'Semua SPK', 'SPK Saya', 'Pengajuan', 'Follow Up', 'Verifikasi SPK', 'Approval', 'Pengiriman'] },
     { title: 'KEUANGAN', labels: ['Pembukuan'] },
-    { title: 'ORGANISASI', labels: ['Semua Unit', 'Unit Dealer', 'Unit & Motor', 'Motor', 'Customer', 'Sales', 'Leasing', 'Dokumen', 'User Management', 'Pengelolaan Akses', 'Log Aktivitas', 'Cabang'] },
+    { title: 'ORGANISASI', labels: ['Stok', 'Semua Unit', 'Unit Dealer', 'Unit & Motor', 'Motor', 'Customer', 'Sales', 'Leasing', 'Dokumen', 'User Management', 'Pengelolaan Akses', 'Log Aktivitas', 'Cabang'] },
     { title: 'KARYAWAN', labels: ['Absensi'] },
     { title: 'LAPORAN', labels: ['Laporan Penjualan', 'Performance', 'Target'] },
     { title: 'PLATFORM', labels: ['Semua Usaha', 'Pusat Bantuan'] },
@@ -4039,7 +4040,7 @@ function App() {
             </div>
             <p className="pos-demo-note">Kwitansi motor dibuat otomatis saat SPK disubmit. Nota dan transaksi pada demo ini hanya tersedia selama sesi browser.</p>
           </section>
-        ) : ['Semua Unit', 'Unit Dealer', 'Motor', 'Unit & Motor'].includes(activePage) ? (
+        ) : ['Stok', 'Semua Unit', 'Unit Dealer', 'Motor', 'Unit & Motor'].includes(activePage) ? (
           <DealerMotorWorkspace
             branches={workspaceBranches}
             canManage={isAuthenticated && activeUser.permissions.includes('unitManage')}
