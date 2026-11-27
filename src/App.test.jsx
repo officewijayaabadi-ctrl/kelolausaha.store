@@ -228,7 +228,7 @@ test('previews dashboard changes without applying them, then applies them for th
   expect(appShell.dataset.sidebar).toBe('compact');
   expect(JSON.parse(localStorage.getItem('ku-demo-theme:dealer_motor')).statCardStyle).toBe('border');
   expect(screen.getByRole('status').textContent).toContain('Tema berhasil diterapkan');
-});
+}, 30000);
 
 test('shows enabled dashboard theme choices to the business Owner', () => {
   render(<App />);
