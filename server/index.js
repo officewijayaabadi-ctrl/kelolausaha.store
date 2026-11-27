@@ -35,6 +35,7 @@ import {
   notifySupportTicketUpdated,
   registerSupportSockets,
 } from './support-chat.js';
+import { shapeBusinessProfile } from '../shared/business-profile.js';
 import {
   applyDashboardTheme,
   dashboardThemeIds,
@@ -1326,7 +1327,7 @@ app.get('/api/workspace/profile', authenticate, requireTenant, async (req, res, 
       [req.user.company_id],
     );
     if (!result.rowCount) return res.status(404).json({ message: 'Workspace tidak ditemukan.' });
-    res.json({ profile: result.rows[0] });
+    res.json({ profile: shapeBusinessProfile(result.rows[0]) });
   } catch (error) {
     next(error);
   }
@@ -1386,12 +1387,13 @@ app.put('/api/workspace/profile', authenticate, requireRole('SUPER ADMIN', 'OWNE
 
     await client.query('COMMIT');
     res.json({
-      profile: {
+      profile: shapeBusinessProfile({
         name: company.rows[0].name,
         address: branch.rows[0].address,
-        logoUrl: company.rows[0].logoUrl || '',
-        qrisUrl: company.rows[0].qrisUrl || '',
-      },
+        phone: company.rows[0].phone,
+        logoUrl: company.rows[0].logoUrl,
+        qrisUrl: company.rows[0].qrisUrl,
+      }),
     });
   } catch (error) {
     await client.query('ROLLBACK');
