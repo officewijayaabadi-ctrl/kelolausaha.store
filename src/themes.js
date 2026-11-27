@@ -1,25 +1,76 @@
 import { resolveTheme as resolveDesignSystemTheme } from '../packages/design-system/core/ThemeResolver.js';
 
 export const dashboardThemes = [
-  { id: 'red-white', name: 'Crimson Momentum', primary: '#ef4444', secondary: '#fff1f2', mode: 'light' },
-  { id: 'green-fresh', name: 'Emerald Energy', primary: '#10b981', secondary: '#ecfdf5', mode: 'light' },
-  { id: 'purple-elegant', name: 'Violet Future', primary: '#8b5cf6', secondary: '#f5f3ff', mode: 'light' },
-  { id: 'orange-cheerful', name: 'Sunset Boost', primary: '#f97316', secondary: '#fff7ed', mode: 'light' },
-  { id: 'pink-sweet', name: 'Pink Horizon', primary: '#ec4899', secondary: '#fdf2f8', mode: 'light' },
-  { id: 'teal-modern', name: 'Aqua Digital', primary: '#06b6d4', secondary: '#ecfeff', mode: 'light' },
-  { id: 'navy-elegant', name: 'Midnight Blue', primary: '#3b82f6', secondary: '#172554', mode: 'dark' },
-  { id: 'yellow-warm', name: 'Solar Gold', primary: '#eab308', secondary: '#fefce8', mode: 'light' },
-  { id: 'gray-minimal', name: 'Graphite Clean', primary: '#64748b', secondary: '#f1f5f9', mode: 'light' },
-  { id: 'white-clean', name: 'Arctic Focus', primary: '#2563eb', secondary: '#eff6ff', mode: 'light' },
+  { id: 'ocean-blue', name: 'Ocean Blue', description: 'Cerah dan profesional', primary: '#2563eb', secondary: '#eff6ff', accent: '#0ea5e9', background: '#f8fafc', surface: '#ffffff', sidebar: '#ffffff', header: '#ffffff', text: '#1e293b', textMuted: '#64748b', border: '#e2e8f0', mode: 'light' },
+  { id: 'emerald-fresh', name: 'Emerald Fresh', description: 'Segar dan natural', primary: '#059669', secondary: '#ecfdf5', accent: '#10b981', background: '#f7fbf9', surface: '#ffffff', sidebar: '#ffffff', header: '#ffffff', text: '#16352b', textMuted: '#648075', border: '#dcebe3', mode: 'light' },
+  { id: 'royal-purple', name: 'Royal Purple', description: 'Elegan dan modern', primary: '#7c3aed', secondary: '#f5f3ff', accent: '#a78bfa', background: '#faf9ff', surface: '#ffffff', sidebar: '#ffffff', header: '#ffffff', text: '#2e2445', textMuted: '#766b89', border: '#e9e3f4', mode: 'light' },
+  { id: 'sunset-orange', name: 'Sunset Orange', description: 'Hangat dan energik', primary: '#ea580c', secondary: '#fff7ed', accent: '#fb923c', background: '#fffbf7', surface: '#ffffff', sidebar: '#ffffff', header: '#ffffff', text: '#3d2c20', textMuted: '#867466', border: '#f1e4d8', mode: 'light' },
+  { id: 'rose-premium', name: 'Rose Premium', description: 'Lembut dan eksklusif', primary: '#be3455', secondary: '#fff1f4', accent: '#ec4899', background: '#fff9fa', surface: '#ffffff', sidebar: '#ffffff', header: '#ffffff', text: '#3b2530', textMuted: '#856d78', border: '#f1dfe5', mode: 'light' },
+  { id: 'sky-minimal', name: 'Sky Minimal', description: 'Minimalis dan ringan', primary: '#0284c7', secondary: '#f0f9ff', accent: '#38bdf8', background: '#f7fbfe', surface: '#ffffff', sidebar: '#ffffff', header: '#ffffff', text: '#1f3443', textMuted: '#6b8291', border: '#deebf2', mode: 'light' },
+  { id: 'indigo-pro', name: 'Indigo Pro', description: 'Profesional korporat', primary: '#4f46e5', secondary: '#eef2ff', accent: '#818cf8', background: '#f8f9ff', surface: '#ffffff', sidebar: '#ffffff', header: '#ffffff', text: '#25294a', textMuted: '#6c7191', border: '#e2e5f2', mode: 'light' },
+  { id: 'teal-modern', name: 'Teal Modern', description: 'Modern dan seimbang', primary: '#0f766e', secondary: '#f0fdfa', accent: '#2dd4bf', background: '#f6fbfa', surface: '#ffffff', sidebar: '#ffffff', header: '#ffffff', text: '#1c3533', textMuted: '#68817e', border: '#dcebe8', mode: 'light' },
+  { id: 'gold-luxury', name: 'Gold Luxury', description: 'Premium dan mewah', primary: '#a16207', secondary: '#fefce8', accent: '#eab308', background: '#fcfbf7', surface: '#ffffff', sidebar: '#ffffff', header: '#ffffff', text: '#352e1b', textMuted: '#81775e', border: '#eee8d8', mode: 'light' },
+  { id: 'midnight-dark', name: 'Midnight Dark', description: 'Gelap dan fokus', primary: '#818cf8', secondary: '#1e293b', accent: '#38bdf8', background: '#111827', surface: '#1f2937', sidebar: '#172033', header: '#1f2937', text: '#f1f5f9', textMuted: '#a8b4c5', border: '#374151', mode: 'dark' },
 ];
 
-export const defaultThemeSettings = {
-  themeId: 'red-white',
+export const defaultDashboardThemeSettings = {
+  themeId: 'ocean-blue',
   customPrimary: '',
   customSecondary: '',
-  mode: 'light',
-  sidebarMode: 'wide',
+  customAccent: '',
+  customBackground: '',
+  customSurface: '',
+  customSidebar: '',
+  customHeader: '',
+  customText: '',
+  customTextMuted: '',
+  customBorder: '',
+  dashboardLogoUrl: '',
+  dashboardFaviconUrl: '',
+  fontFamily: 'Inter',
+  fontSize: 14,
+  fontWeight: 400,
+  titleSize: 24,
+  menuTextSize: 13,
+  lineHeight: 1.5,
+  layout: 'modern-grid',
+  contentWidth: 1400,
+  componentGap: 16,
+  statCardColumns: 4,
+  cardSize: 'normal',
+  contentPadding: 24,
+  sidebarMode: 'normal',
+  sidebarContent: 'icons-labels',
+  sidebarIcons: true,
+  sidebarIconSize: 18,
+  sidebarMenuGap: 8,
+  sidebarActiveRadius: 10,
+  logoPosition: 'top',
+  showNotifications: true,
+  showUserProfile: true,
+  headerStyle: 'modern',
+  headerHeight: 64,
+  headerShadow: true,
+  headerSticky: true,
+  cardStyle: 'rounded',
   statCardStyle: 'shadow',
+  cardRadius: 16,
+  cardShadow: 'soft',
+  cardBorder: false,
+  cardPadding: 18,
+  buttonStyle: 'rounded',
+  buttonRadius: 10,
+  buttonHeight: 40,
+  buttonTextSize: 14,
+  buttonSecondaryColor: '#eef2f7',
+  buttonHoverColor: '',
+  buttonOutline: false,
+  density: 'comfortable',
+  mode: 'light',
+};
+
+export const defaultThemeSettings = {
+  ...defaultDashboardThemeSettings,
   logoUrl: '',
   faviconUrl: '',
   qrisUrl: '',
@@ -56,9 +107,30 @@ export function normalizeThemeSettings(settings = {}, businessType = 'dealer_mot
   const { receiptSettings, ...otherSettings } = settings && typeof settings === 'object' && !Array.isArray(settings)
     ? settings
     : {};
+  const legacyThemeIds = {
+    'red-white': 'ocean-blue',
+    'blue-professional': 'ocean-blue',
+    'green-fresh': 'emerald-fresh',
+    'purple-elegant': 'royal-purple',
+    'orange-cheerful': 'sunset-orange',
+    'pink-sweet': 'rose-premium',
+    'navy-elegant': 'midnight-dark',
+    'yellow-warm': 'gold-luxury',
+    'gray-minimal': 'sky-minimal',
+    'white-clean': 'sky-minimal',
+  };
+  const themeId = legacyThemeIds[otherSettings.themeId] || otherSettings.themeId;
   const normalized = {
     ...defaultThemeSettings,
     ...otherSettings,
+    themeId: dashboardThemes.some((theme) => theme.id === themeId)
+      ? themeId
+      : defaultDashboardThemeSettings.themeId,
+    sidebarMode: otherSettings.sidebarMode === 'mini'
+      ? 'compact'
+      : otherSettings.sidebarMode === 'wide'
+        ? 'expanded'
+        : otherSettings.sidebarMode || defaultDashboardThemeSettings.sidebarMode,
     receiptSettings: {
       ...getDefaultReceiptSettings(businessType),
       ...(receiptSettings && typeof receiptSettings === 'object' && !Array.isArray(receiptSettings)
@@ -66,8 +138,13 @@ export function normalizeThemeSettings(settings = {}, businessType = 'dealer_mot
         : {}),
     },
   };
-  if (normalized.themeId === 'blue-professional') normalized.themeId = 'red-white';
   return normalized;
+}
+
+export function normalizeDashboardThemeSettings(settings = {}) {
+  const normalized = normalizeThemeSettings(settings);
+  return Object.fromEntries(Object.keys(defaultDashboardThemeSettings)
+    .map((key) => [key, normalized[key]]));
 }
 
 export const receiptModes = [
@@ -82,12 +159,37 @@ export const receiptAccents = [
   { id: 'royal', name: 'Royal Blue', color: '#2563eb', background: '#eff6ff' },
 ];
 
-export function getThemeColors(settings) {
+export function getThemeColors(settings, systemDarkMode = false) {
   const theme = dashboardThemes.find(({ id }) => id === settings.themeId) || dashboardThemes[0];
+  const settingMode = settings.mode || theme.mode;
+  const isDark = settingMode === 'dark' || (settingMode === 'system' && systemDarkMode);
+  const darkPalette = theme.mode === 'dark';
   return {
     primary: settings.customPrimary || theme.primary,
     secondary: settings.customSecondary || theme.secondary,
-    mode: settings.mode || theme.mode,
+    accent: settings.customAccent || theme.accent,
+    background: settings.customBackground || (isDark
+      ? darkPalette ? theme.background : '#111827'
+      : darkPalette ? '#f8fafc' : theme.background),
+    surface: settings.customSurface || (isDark
+      ? darkPalette ? theme.surface : '#1f2937'
+      : darkPalette ? '#ffffff' : theme.surface),
+    sidebar: settings.customSidebar || (isDark
+      ? darkPalette ? theme.sidebar : '#172033'
+      : darkPalette ? '#ffffff' : theme.sidebar),
+    header: settings.customHeader || (isDark
+      ? darkPalette ? theme.header : '#1f2937'
+      : darkPalette ? '#ffffff' : theme.header),
+    text: settings.customText || (isDark
+      ? darkPalette ? theme.text : '#f1f5f9'
+      : darkPalette ? '#1e293b' : theme.text),
+    textMuted: settings.customTextMuted || (isDark
+      ? darkPalette ? theme.textMuted : '#a8b4c5'
+      : darkPalette ? '#64748b' : theme.textMuted),
+    border: settings.customBorder || (isDark
+      ? darkPalette ? theme.border : '#374151'
+      : darkPalette ? '#e2e8f0' : theme.border),
+    mode: settingMode === 'system' ? (systemDarkMode ? 'dark' : 'light') : settingMode,
   };
 }
 

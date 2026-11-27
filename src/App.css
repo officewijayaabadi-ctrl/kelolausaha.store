@@ -48,7 +48,10 @@ button.dealer-switch:focus-visible { outline: 2px solid var(--theme-primary, #bd
 .dealer-copy strong { color: #343c46; font-size: 12px; font-weight: 600; }
 .dealer-copy small { color: #9299a2; font-size: 10px; }
 .switch-chevron { margin-left: auto; color: #9aa1aa; font-size: 18px; }
-.main-nav { display: grid; gap: 4px; margin-top: 12px; }
+.main-nav { display: grid; flex: 1; min-height: 0; align-content: start; gap: 4px; overflow-x: hidden; overflow-y: auto; margin-top: 12px; padding-right: 4px; overscroll-behavior: contain; scrollbar-color: #cbd5e1 transparent; scrollbar-gutter: stable; scrollbar-width: thin; }
+.main-nav::-webkit-scrollbar { width: 5px; height: 5px; }
+.main-nav::-webkit-scrollbar-thumb { border-radius: 999px; background: #cbd5e1; }
+.main-nav::-webkit-scrollbar-track { background: transparent; }
 .nav-item { display: flex; align-items: center; gap: 12px; min-height: 40px; padding: 0 11px; border: 0; border-radius: 7px; color: #626b76; background: transparent; text-align: left; font-size: 12px; transition: background .15s, color .15s; }
 .nav-item:hover { color: #bd2635; background: #fff5f5; }
 .nav-item.active { color: #bd2635; background: #ffeded; font-weight: 600; }
@@ -317,7 +320,7 @@ td .spk-id { color: #316d50; font-size: 9px; }
   .sidebar { position: static; width: 100%; min-height: auto; padding: 13px 15px; }
   .brand { padding: 0 3px 12px; }
   .workspace-label, .dealer-switch, .nav-label, .sidebar-bottom { display: none; }
-  .main-nav { display: flex; overflow-x: auto; gap: 5px; margin-top: 0; padding-bottom: 2px; }
+  .main-nav { display: flex; flex: 0 0 auto; min-height: auto; overflow-x: auto; overflow-y: hidden; gap: 5px; margin-top: 0; padding: 0 0 2px; scrollbar-gutter: auto; }
   .nav-item { min-height: 35px; flex: 0 0 auto; gap: 7px; padding: 0 9px; font-size: 10px; }
   .nav-icon { font-size: 13px; }
   .main-area { margin-left: 0; }

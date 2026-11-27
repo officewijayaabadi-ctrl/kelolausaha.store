@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from 'vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import App, { createPosReceiptSvg, getUserMenus, getWorkspaceModulesForBusiness } from './App';
 
 const { mockIo, mockSocket, mockSocketHandlers } = vi.hoisted(() => {
@@ -83,6 +83,11 @@ test('opens workspace settings from the active workspace and keeps dealer invent
   fireEvent.click(screen.getByRole('button', { name: 'Stok' }));
   expect(screen.getByRole('heading', { name: 'Stok unit motor' })).toBeDefined();
   fireEvent.click(screen.getByRole('button', { name: 'Buka pengaturan workspace' }));
+  expect(screen.getByRole('menu', { name: 'Menu pengaturan workspace' })).toBeDefined();
+  expect(screen.getByRole('menuitem', { name: /Pengaturan Usaha/ })).toBeDefined();
+  expect(screen.getByRole('menuitem', { name: /Pengaturan POS/ })).toBeDefined();
+  expect(screen.getByRole('menuitem', { name: /Stok Unit/ })).toBeDefined();
+  fireEvent.click(screen.getByRole('menuitem', { name: /Struktur Workspace/ }));
 
   expect(screen.getByRole('heading', { name: 'Struktur Workspace' })).toBeDefined();
   const vehiclesModule = screen.getByRole('checkbox', { name: /Data motor & stok unit/ });
@@ -92,10 +97,22 @@ test('opens workspace settings from the active workspace and keeps dealer invent
   expect(vehiclesModule.checked).toBe(true);
   expect(screen.getByRole('status').textContent).toContain('aktif dan wajib');
   fireEvent.click(screen.getByRole('button', { name: 'Pengaturan tema usaha' }));
-  expect(screen.getByRole('heading', { name: 'Tampilan Dashboard' })).toBeDefined();
-  expect(screen.getByRole('button', { name: /Crimson Momentum/ }).disabled).toBe(false);
+  expect(screen.getByRole('heading', { name: 'Pengaturan Tampilan Dashboard' })).toBeDefined();
+  expect(screen.getByRole('button', { name: 'Terapkan Tema' }).disabled).toBe(false);
   expect(getWorkspaceModulesForBusiness('dealer_motor', ['dashboard'])).toContain('vehicles');
   expect(getWorkspaceModulesForBusiness('retail', ['dashboard'])).not.toContain('vehicles');
+});
+
+test('opens POS settings from the workspace quick menu', () => {
+  render(<App />);
+  openOwnerPreview();
+  fireEvent.change(screen.getByRole('combobox', { name: 'Pilih akun demo' }), {
+    target: { value: 'user-2' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Buka pengaturan workspace' }));
+  fireEvent.click(screen.getByRole('menuitem', { name: /Pengaturan POS/ }));
+
+  expect(screen.getByRole('heading', { name: 'Studio Nota' })).toBeDefined();
 });
 
 test('shows the business QRIS in the cashier when QRIS is selected', async () => {
@@ -171,24 +188,32 @@ test('allows an Owner to invite a Super Admin but limits Super Admin invites to 
   });
 });
 
-test('customizes and saves a company dashboard theme in the demo browser', () => {
+test('previews dashboard changes without applying them, then applies them for the demo company', () => {
   const { container } = render(<App />);
   openOwnerPreview();
   fireEvent.change(screen.getByRole('combobox', { name: 'Pilih akun demo' }), {
     target: { value: 'user-1' },
   });
   fireEvent.click(screen.getByRole('button', { name: 'Tampilan Dashboard' }));
-  fireEvent.click(screen.getByRole('button', { name: /Midnight Blue/ }));
-  fireEvent.change(screen.getByLabelText('Tampilan sidebar'), { target: { value: 'mini' } });
-  fireEvent.change(screen.getByLabelText('Gaya kartu statistik'), { target: { value: 'soft' } });
-  fireEvent.click(screen.getByRole('button', { name: /simpan tampilan/i }));
+  const midnightTheme = Array.from(container.querySelectorAll('.theme-gallery-card'))
+    .find((card) => card.textContent.includes('Midnight Dark'));
+  fireEvent.click(within(midnightTheme).getByRole('button', { name: 'Pilih tema' }));
+  fireEvent.change(screen.getByLabelText('Mode sidebar'), { target: { value: 'compact' } });
+  fireEvent.change(screen.getByLabelText('Gaya kartu'), { target: { value: 'flat' } });
 
   const appShell = container.querySelector('.app-shell');
-  expect(appShell.dataset.theme).toBe('navy-elegant');
+  expect(appShell.dataset.theme).toBe('ocean-blue');
+  fireEvent.click(screen.getByRole('button', { name: 'Simpan Draft' }));
+  expect(appShell.dataset.theme).toBe('ocean-blue');
+  expect(JSON.parse(localStorage.getItem('ku-demo-theme-state:dealer_motor')).draft.themeId)
+    .toBe('midnight-dark');
+  fireEvent.click(screen.getByRole('button', { name: 'Terapkan Tema' }));
+
+  expect(appShell.dataset.theme).toBe('midnight-dark');
   expect(appShell.dataset.dashboardMode).toBe('dark');
-  expect(appShell.dataset.sidebar).toBe('mini');
-  expect(JSON.parse(localStorage.getItem('ku-demo-theme:dealer_motor')).statCardStyle).toBe('soft');
-  expect(screen.getByRole('status').textContent).toContain('Tema pratinjau tersimpan');
+  expect(appShell.dataset.sidebar).toBe('compact');
+  expect(JSON.parse(localStorage.getItem('ku-demo-theme:dealer_motor')).statCardStyle).toBe('border');
+  expect(screen.getByRole('status').textContent).toContain('Tema berhasil diterapkan');
 });
 
 test('shows enabled dashboard theme choices to the business Owner', () => {
@@ -199,9 +224,9 @@ test('shows enabled dashboard theme choices to the business Owner', () => {
   });
   fireEvent.click(screen.getByRole('button', { name: 'Tampilan Dashboard' }));
 
-  const themeChoice = screen.getByRole('button', { name: /Crimson Momentum/ });
-  expect(themeChoice.disabled).toBe(false);
-  expect(screen.queryByText(/Hanya Owner dan Super Admin/)).toBeNull();
+  const applyButton = screen.getByRole('button', { name: 'Terapkan Tema' });
+  expect(applyButton.disabled).toBe(false);
+  expect(screen.queryByText(/tidak memiliki izin untuk mengubah tampilan perusahaan/)).toBeNull();
 });
 
 test('opens the receipt studio for Owner and Super Admin and saves workspace preferences', async () => {

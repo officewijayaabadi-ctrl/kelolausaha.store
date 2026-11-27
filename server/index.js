@@ -35,6 +35,14 @@ import {
   notifySupportTicketUpdated,
   registerSupportSockets,
 } from './support-chat.js';
+import {
+  applyDashboardTheme,
+  dashboardThemeIds,
+  pickDashboardThemeSettings,
+  restorePreviousDashboardTheme,
+  validateDashboardThemeAssets,
+  validateDashboardThemeSettings,
+} from './workspace-theme.js';
 
 const { Pool } = pg;
 const app = express();
@@ -53,7 +61,7 @@ const otpRateLimits = new Map();
 const sentSupportMailboxCursors = new Map();
 let gmailSyncInProgress = false;
 let supportIo = null;
-const themeIds = new Set(['red-white', 'blue-professional', 'green-fresh', 'purple-elegant', 'orange-cheerful', 'pink-sweet', 'teal-modern', 'navy-elegant', 'yellow-warm', 'gray-minimal', 'white-clean']);
+const themeIds = dashboardThemeIds;
 const imageExtensions = new Set(['png', 'jpg', 'webp', 'ico']);
 const permissionSets = {
   'SUPER ADMIN': ['dashboard', 'spkCreate', 'spkViewAll', 'spkViewOwn', 'spkVerify', 'spkApprove', 'customerManage', 'salesManage', 'unitManage', 'leasingManage', 'posAccess', 'priceManage', 'transactionsView', 'receiptsView', 'userManage', 'accessManage', 'themeManage', 'attendanceView', 'branchManage'],
@@ -192,6 +200,10 @@ function cookieValue(req, key) {
 }
 
 function publicBusiness(row, req) {
+  const themeSettings = { ...(row.theme_settings || {}) };
+  delete themeSettings.dashboardDraft;
+  delete themeSettings.previousDashboardTheme;
+  delete themeSettings.dashboardThemeHistory;
   return {
     id: row.id,
     name: row.name,
@@ -210,7 +222,7 @@ function publicBusiness(row, req) {
       activeUntil: row.active_until,
       planId: row.plan_id,
     },
-    themeSettings: row.theme_settings || {},
+    themeSettings,
   };
 }
 
@@ -1128,13 +1140,171 @@ app.get('/api/workspace/theme', authenticate, requireTenant, async (req, res, ne
       [req.user.company_id],
     );
     if (!result.rowCount) return res.status(404).json({ message: 'Workspace tidak ditemukan.' });
+    const storedThemeSettings = result.rows[0].theme_settings || {};
+    const {
+      dashboardDraft,
+      previousDashboardTheme,
+      dashboardThemeHistory,
+      ...themeSettings
+    } = storedThemeSettings;
     res.json({
-      themeSettings: result.rows[0].theme_settings,
+      themeSettings,
+      dashboardDraft: dashboardDraft || pickDashboardThemeSettings(themeSettings),
+      previousDashboardTheme: previousDashboardTheme || null,
+      dashboardThemeHistory: Array.isArray(dashboardThemeHistory) ? dashboardThemeHistory : [],
       businessType: result.rows[0].business_type,
       modules: result.rows[0].modules,
     });
   } catch (error) {
     next(error);
+  }
+});
+
+app.put('/api/workspace/theme/draft', authenticate, requirePermission('themeManage'), requireTenant, async (req, res, next) => {
+  const dashboardDraft = pickDashboardThemeSettings(req.body?.dashboardDraft);
+  if (!validateDashboardThemeSettings(dashboardDraft)
+    || !validateDashboardThemeAssets(dashboardDraft, req.user.company_id)) {
+    return res.status(400).json({ message: 'Draft tampilan dashboard tidak valid.' });
+  }
+  try {
+    const result = await pool.query(
+      `UPDATE companies
+       SET theme_settings = jsonb_set(
+         COALESCE(theme_settings, '{}'::jsonb),
+         '{dashboardDraft}',
+         $1::jsonb,
+         true
+       )
+       WHERE id = $2
+       RETURNING theme_settings`,
+      [JSON.stringify(dashboardDraft), req.user.company_id],
+    );
+    if (!result.rowCount) return res.status(404).json({ message: 'Workspace tidak ditemukan.' });
+    res.json({
+      dashboardDraft,
+      previousDashboardTheme: result.rows[0].theme_settings.previousDashboardTheme || null,
+      dashboardThemeHistory: result.rows[0].theme_settings.dashboardThemeHistory || [],
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete('/api/workspace/theme/draft', authenticate, requirePermission('themeManage'), requireTenant, async (req, res, next) => {
+  try {
+    const result = await pool.query(
+      `UPDATE companies
+       SET theme_settings = COALESCE(theme_settings, '{}'::jsonb) - 'dashboardDraft'
+       WHERE id = $1
+       RETURNING theme_settings`,
+      [req.user.company_id],
+    );
+    if (!result.rowCount) return res.status(404).json({ message: 'Workspace tidak ditemukan.' });
+    const { dashboardDraft, previousDashboardTheme, dashboardThemeHistory, ...themeSettings } = result.rows[0].theme_settings;
+    res.json({
+      dashboardDraft: pickDashboardThemeSettings(themeSettings),
+      previousDashboardTheme: previousDashboardTheme || null,
+      dashboardThemeHistory: Array.isArray(dashboardThemeHistory) ? dashboardThemeHistory : [],
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/workspace/theme/apply', authenticate, requirePermission('themeManage'), requireTenant, async (req, res, next) => {
+  const dashboardDraft = pickDashboardThemeSettings(req.body?.dashboardDraft);
+  if (!validateDashboardThemeSettings(dashboardDraft)
+    || !validateDashboardThemeAssets(dashboardDraft, req.user.company_id)) {
+    return res.status(400).json({ message: 'Pengaturan draft dashboard tidak valid.' });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const currentResult = await client.query(
+      'SELECT theme_settings FROM companies WHERE id = $1 FOR UPDATE',
+      [req.user.company_id],
+    );
+    if (!currentResult.rowCount) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ message: 'Workspace tidak ditemukan.' });
+    }
+    const nextThemeSettings = applyDashboardTheme(
+      currentResult.rows[0].theme_settings || {},
+      dashboardDraft,
+    );
+    const result = await client.query(
+      `UPDATE companies
+       SET theme_settings = $1::jsonb
+       WHERE id = $2
+       RETURNING theme_settings`,
+      [JSON.stringify(nextThemeSettings), req.user.company_id],
+    );
+    await client.query('COMMIT');
+    const stored = result.rows[0].theme_settings;
+    const {
+      dashboardDraft: savedDraft,
+      previousDashboardTheme,
+      dashboardThemeHistory,
+      ...themeSettings
+    } = stored;
+    res.json({
+      themeSettings,
+      dashboardDraft: savedDraft,
+      previousDashboardTheme,
+      dashboardThemeHistory,
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    next(error);
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/api/workspace/theme/restore', authenticate, requirePermission('themeManage'), requireTenant, async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const currentResult = await client.query(
+      'SELECT theme_settings FROM companies WHERE id = $1 FOR UPDATE',
+      [req.user.company_id],
+    );
+    if (!currentResult.rowCount) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ message: 'Workspace tidak ditemukan.' });
+    }
+    const nextThemeSettings = restorePreviousDashboardTheme(currentResult.rows[0].theme_settings || {});
+    if (!nextThemeSettings
+      || !validateDashboardThemeAssets(nextThemeSettings, req.user.company_id)) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ message: 'Belum ada tema sebelumnya yang dapat dipulihkan.' });
+    }
+    const result = await client.query(
+      `UPDATE companies
+       SET theme_settings = $1::jsonb
+       WHERE id = $2
+       RETURNING theme_settings`,
+      [JSON.stringify(nextThemeSettings), req.user.company_id],
+    );
+    await client.query('COMMIT');
+    const stored = result.rows[0].theme_settings;
+    const {
+      dashboardDraft: savedDraft,
+      previousDashboardTheme,
+      dashboardThemeHistory,
+      ...themeSettings
+    } = stored;
+    res.json({
+      themeSettings,
+      dashboardDraft: savedDraft,
+      previousDashboardTheme,
+      dashboardThemeHistory,
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    next(error);
+  } finally {
+    client.release();
   }
 });
 
@@ -1231,25 +1401,17 @@ app.put('/api/workspace/profile', authenticate, requireRole('SUPER ADMIN', 'OWNE
   }
 });
 
-app.put('/api/workspace/theme', authenticate, requireRole('SUPER ADMIN', 'OWNER'), requireTenant, async (req, res, next) => {
-  const {
-    themeId,
-    customPrimary,
-    customSecondary,
-    mode,
-    sidebarMode,
-    statCardStyle,
-    logoUrl,
-    faviconUrl,
-  } = req.body;
+app.put('/api/workspace/theme', authenticate, requirePermission('themeManage'), requireTenant, async (req, res, next) => {
+  const dashboardSettings = pickDashboardThemeSettings(req.body);
+  const { logoUrl, faviconUrl } = req.body || {};
+  const themeId = dashboardSettings.themeId;
   const qrisUrl = typeof req.body?.qrisUrl === 'string' ? req.body.qrisUrl.trim() : undefined;
   const hasQrisUrl = Object.prototype.hasOwnProperty.call(req.body || {}, 'qrisUrl');
   const hasReceiptSettings = Object.prototype.hasOwnProperty.call(req.body || {}, 'receiptSettings');
   const receiptSettings = req.body?.receiptSettings;
-  const validColor = (value) => value === '' || /^#[0-9a-f]{6}$/i.test(value);
   const validAsset = (value) => !value
     || (value.startsWith(`/uploads/${req.user.company_id}/`) && !value.includes('..'));
-  const themeSettings = { themeId, customPrimary, customSecondary, mode, sidebarMode, statCardStyle, logoUrl, faviconUrl };
+  const themeSettings = { ...dashboardSettings, logoUrl, faviconUrl };
   if (qrisUrl !== undefined) themeSettings.qrisUrl = qrisUrl;
   if (hasReceiptSettings) {
     themeSettings.receiptSettings = {
@@ -1274,11 +1436,8 @@ app.put('/api/workspace/theme', authenticate, requireRole('SUPER ADMIN', 'OWNER'
     && receiptSettings.footerNote.length <= 240
   );
   if (!themeIds.has(themeId)
-    || !validColor(customPrimary)
-    || !validColor(customSecondary)
-    || !['light', 'dark'].includes(mode)
-    || !['mini', 'wide'].includes(sidebarMode)
-    || !['shadow', 'border', 'soft'].includes(statCardStyle)
+    || !validateDashboardThemeSettings(dashboardSettings)
+    || !validateDashboardThemeAssets(dashboardSettings, req.user.company_id)
     || !validAsset(logoUrl)
     || !validAsset(faviconUrl)
     || !validReceiptSettings
@@ -1295,13 +1454,20 @@ app.put('/api/workspace/theme', authenticate, requireRole('SUPER ADMIN', 'OWNER'
       [JSON.stringify(themeSettings), req.user.company_id],
     );
     if (!result.rowCount) return res.status(404).json({ message: 'Workspace tidak ditemukan.' });
-    res.json({ themeSettings: result.rows[0].theme_settings });
+    const stored = result.rows[0].theme_settings;
+    const { dashboardDraft, previousDashboardTheme, dashboardThemeHistory, ...activeThemeSettings } = stored;
+    res.json({
+      themeSettings: activeThemeSettings,
+      dashboardDraft: dashboardDraft || pickDashboardThemeSettings(activeThemeSettings),
+      previousDashboardTheme: previousDashboardTheme || null,
+      dashboardThemeHistory: Array.isArray(dashboardThemeHistory) ? dashboardThemeHistory : [],
+    });
   } catch (error) {
     next(error);
   }
 });
 
-app.post('/api/workspace/assets', authenticate, requireRole('SUPER ADMIN', 'OWNER'), requireTenant, upload.single('file'), async (req, res, next) => {
+app.post('/api/workspace/assets', authenticate, requirePermission('themeManage'), requireTenant, upload.single('file'), async (req, res, next) => {
   if (!req.file || !['logo', 'favicon', 'qris'].includes(req.body.assetType)) {
     return res.status(400).json({ message: 'Pilih file logo, favicon, atau QRIS yang valid.' });
   }
@@ -1411,8 +1577,15 @@ app.get('/api/billing/status', authenticate, requireRole('OWNER'), requireTenant
       ),
     ]);
     if (!companyResult.rowCount) return res.status(404).json({ message: 'Workspace tidak ditemukan.' });
+    const storedThemeSettings = companyResult.rows[0].theme_settings || {};
     res.json({
       business: publicBusiness(companyResult.rows[0], req),
+      dashboardDraft: storedThemeSettings.dashboardDraft
+        || pickDashboardThemeSettings(storedThemeSettings),
+      previousDashboardTheme: storedThemeSettings.previousDashboardTheme || null,
+      dashboardThemeHistory: Array.isArray(storedThemeSettings.dashboardThemeHistory)
+        ? storedThemeSettings.dashboardThemeHistory
+        : [],
       orders: orderResult.rows,
       notifications: notificationResult.rows,
       plans,

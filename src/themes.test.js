@@ -2,41 +2,63 @@ import { describe, expect, test } from 'vitest';
 import { dashboardThemes, defaultThemeSettings, getThemeColors, normalizeThemeSettings, resolveDashboardTheme } from './themes.js';
 
 describe('dashboard themes', () => {
-  test('provides ten modern themes with the red-white default and dark theme', () => {
+  test('provides ten modern themes with the Ocean Blue default and Midnight Dark theme', () => {
     expect(dashboardThemes).toHaveLength(10);
-    expect(defaultThemeSettings.themeId).toBe('red-white');
+    expect(defaultThemeSettings.themeId).toBe('ocean-blue');
     expect(dashboardThemes[0]).toMatchObject({
-      name: 'Crimson Momentum',
-      primary: '#ef4444',
-      secondary: '#fff1f2',
+      name: 'Ocean Blue',
+      primary: '#2563eb',
+      secondary: '#eff6ff',
     });
-    expect(dashboardThemes.find(({ id }) => id === 'white-clean')).toBeDefined();
-    expect(dashboardThemes.find(({ id }) => id === 'navy-elegant').mode).toBe('dark');
+    expect(dashboardThemes.find(({ id }) => id === 'emerald-fresh')).toBeDefined();
+    expect(dashboardThemes.find(({ id }) => id === 'midnight-dark').mode).toBe('dark');
   });
 
-  test('migrates saved blue defaults to red-white without dropping company options', () => {
+  test('migrates legacy saved themes without dropping company options', () => {
     expect(normalizeThemeSettings({ themeId: 'blue-professional', sidebarMode: 'mini' })).toMatchObject({
-      themeId: 'red-white',
-      sidebarMode: 'mini',
+      themeId: 'ocean-blue',
+      sidebarMode: 'compact',
     });
   });
 
   test('allows company colors to override the selected palette', () => {
     expect(getThemeColors({
-      themeId: 'green-fresh',
+      themeId: 'emerald-fresh',
       customPrimary: '#123456',
       customSecondary: '',
       mode: 'dark',
-    })).toEqual({ primary: '#123456', secondary: '#ecfdf5', mode: 'dark' });
+    })).toMatchObject({
+      primary: '#123456',
+      secondary: '#ecfdf5',
+      accent: '#10b981',
+      background: '#111827',
+      surface: '#1f2937',
+      text: '#f1f5f9',
+      mode: 'dark',
+    });
   });
 
   test('uses the legacy adapter for saved themes outside the new registry', () => {
-    expect(resolveDashboardTheme('dealer-motor', 'green-fresh', {
+    expect(resolveDashboardTheme('dealer-motor', 'emerald-fresh', {
       'dealer-motor': [{ id: 'dealer-01' }],
-    }).id).toBe('green-fresh');
+    }).id).toBe('emerald-fresh');
     expect(resolveDashboardTheme('retail', 'dealer-01', {
       retail: [{ id: 'retail-01' }],
-    }).id).toBe('red-white');
+    }).id).toBe('ocean-blue');
+  });
+
+  test('resolves dark and system modes to readable theme tokens', () => {
+    expect(getThemeColors({ themeId: 'ocean-blue', mode: 'dark' })).toMatchObject({
+      background: '#111827',
+      surface: '#1f2937',
+      text: '#f1f5f9',
+      mode: 'dark',
+    });
+    expect(getThemeColors({ themeId: 'ocean-blue', mode: 'system' }, true)).toMatchObject({
+      background: '#111827',
+      mode: 'dark',
+    });
+    expect(getThemeColors({ themeId: 'ocean-blue', mode: 'system' }, false).mode).toBe('light');
   });
 
   test('uses the business type accent for new receipt settings and preserves saved choices', () => {

@@ -6,8 +6,7 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "resolveJsonModule": true,
-    "target": "ES2022",
-    "baseUrl": "."
+    "target": "ES2022"
   },
   "include": [
     "src/**/*",

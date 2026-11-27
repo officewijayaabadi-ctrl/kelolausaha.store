@@ -15,13 +15,15 @@ import {
   flattenRolePermissions,
 } from '../shared/industry-business-engine.js';
 import {
-  dashboardThemes,
+  defaultDashboardThemeSettings,
   defaultThemeSettings,
   getThemeColors,
+  normalizeDashboardThemeSettings,
   normalizeThemeSettings,
   receiptAccents,
   receiptModes,
 } from './themes.js';
+import DashboardThemeSettings from './DashboardThemeSettings.jsx';
 import IndustryDashboard from './IndustryDashboard.jsx';
 import { AttendanceWorkspace, BranchManagement } from './WorkspaceOperations.jsx';
 import { DealerMotorWorkspace, DriverDeliveryWorkspace } from './DealerMotorWorkspace.jsx';
@@ -1100,10 +1102,23 @@ function App() {
   const [selectedPlan, setSelectedPlan] = useState('year_1');
   const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [themeSettings, setThemeSettings] = useState(defaultThemeSettings);
+  const [themeDraft, setThemeDraft] = useState(defaultDashboardThemeSettings);
+  const [previousDashboardTheme, setPreviousDashboardTheme] = useState(null);
+  const [dashboardThemeHistory, setDashboardThemeHistory] = useState([]);
+  const [themeDraftDirty, setThemeDraftDirty] = useState(false);
   const [themeNotice, setThemeNotice] = useState('');
   const [themeError, setThemeError] = useState('');
   const [themeSaving, setThemeSaving] = useState(false);
   const themeLoadedRef = useRef(false);
+  const themeLoadedUserRef = useRef('');
+  const themeDraftDirtyRef = useRef(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [systemDarkMode, setSystemDarkMode] = useState(() => (
+    typeof window !== 'undefined'
+      && window.matchMedia
+      && window.matchMedia('(prefers-color-scheme: dark)').matches
+  ));
+  const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [accountProfileOpen, setAccountProfileOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -1237,6 +1252,7 @@ function App() {
 
   const openPage = (page) => {
     setActivePage(page);
+    setWorkspaceMenuOpen(false);
     setNotice('');
     setSupportError('');
     const nextHash = `#/${encodeURIComponent(page)}`;
@@ -1259,6 +1275,15 @@ function App() {
       window.removeEventListener('popstate', syncPageFromUrl);
       window.removeEventListener('hashchange', syncPageFromUrl);
     };
+  }, []);
+
+  useEffect(() => {
+    const media = window.matchMedia?.('(prefers-color-scheme: dark)');
+    if (!media) return undefined;
+    const updateSystemTheme = (event) => setSystemDarkMode(event.matches);
+    setSystemDarkMode(media.matches);
+    media.addEventListener?.('change', updateSystemTheme);
+    return () => media.removeEventListener?.('change', updateSystemTheme);
   }, []);
 
   const createSupportTicket = async (event) => {
@@ -2296,13 +2321,52 @@ function App() {
     ? billingData.business.subscription.trialEndsAt
     : null;
   const ownerTrialCountdown = ownerTrialEnd ? getCountdown(ownerTrialEnd, countdownNow) : null;
-  const activeThemeColors = getThemeColors(themeSettings);
+  const activeThemeColors = getThemeColors(themeSettings, systemDarkMode);
+  const activeDashboardMode = activeThemeColors.mode;
+  const activeThemeStyle = {
+    '--theme-primary': activeThemeColors.primary,
+    '--theme-secondary': activeThemeColors.secondary,
+    '--theme-accent': activeThemeColors.accent,
+    '--theme-background': activeThemeColors.background,
+    '--theme-surface': activeThemeColors.surface,
+    '--theme-sidebar': activeThemeColors.sidebar,
+    '--theme-header': activeThemeColors.header,
+    '--theme-text': activeThemeColors.text,
+    '--theme-text-muted': activeThemeColors.textMuted,
+    '--theme-border': activeThemeColors.border,
+    '--theme-font-family': themeSettings.fontFamily,
+    '--theme-font-size': `${themeSettings.fontSize}px`,
+    '--theme-font-weight': themeSettings.fontWeight,
+    '--theme-title-size': `${themeSettings.titleSize}px`,
+    '--theme-menu-font-size': `${themeSettings.menuTextSize}px`,
+    '--theme-line-height': themeSettings.lineHeight,
+    '--theme-header-height': `${themeSettings.headerHeight}px`,
+    '--theme-card-radius': `${themeSettings.cardRadius}px`,
+    '--theme-button-radius': `${themeSettings.buttonRadius}px`,
+    '--theme-button-height': `${themeSettings.buttonHeight}px`,
+    '--theme-button-font-size': `${themeSettings.buttonTextSize}px`,
+    '--theme-sidebar-active-radius': `${themeSettings.sidebarActiveRadius}px`,
+    '--theme-stat-card-columns': themeSettings.statCardColumns,
+    '--theme-content-width': `${themeSettings.contentWidth}px`,
+    '--theme-content-padding': `${themeSettings.contentPadding}px`,
+    '--theme-component-gap': `${themeSettings.componentGap}px`,
+    '--theme-sidebar-icon-size': `${themeSettings.sidebarIconSize}px`,
+    '--theme-sidebar-menu-gap': `${themeSettings.sidebarMenuGap}px`,
+    '--theme-button-secondary': themeSettings.buttonSecondaryColor,
+    '--theme-button-hover': themeSettings.buttonHoverColor || activeThemeColors.primary,
+    '--theme-card-padding': `${themeSettings.cardPadding}px`,
+  };
+  const updateThemeDraft = (nextSettings) => {
+    themeDraftDirtyRef.current = true;
+    setThemeDraft(nextSettings);
+    setThemeDraftDirty(true);
+  };
   const receiptSettings = {
     ...defaultThemeSettings.receiptSettings,
     ...themeSettings.receiptSettings,
     logoUrl: themeSettings.logoUrl,
   };
-  const canManageTheme = ['OWNER', 'SUPER ADMIN'].includes(activeUser.role);
+  const canManageTheme = activeUser.permissions.includes('themeManage');
   const activeReceiptAccent = receiptAccents.find(({ id }) => id === receiptSettings.accent) || receiptAccents[0];
   const availableAccessModules = accessModules.filter(({ id }) => (
     !platformAccessPermissions.has(id)
@@ -2376,6 +2440,18 @@ function App() {
     ...section,
     items: menus.filter(([label]) => section.labels.includes(label)),
   })).filter((section) => section.items.length > 0);
+  const workspaceQuickLinks = [
+    { page: 'Struktur Workspace', label: 'Struktur Workspace', description: 'Modul dan pengaturan workspace', icon: '☷' },
+    { page: 'Profil Usaha', label: 'Pengaturan Usaha', description: 'Nama, alamat, kontak, logo, dan QRIS', icon: '⌂' },
+    { page: 'Pengaturan Nota', label: 'Pengaturan POS', description: 'Tampilan nota yang digunakan di POS', icon: '▧' },
+    { page: 'Tampilan Dashboard', label: 'Tampilan Dashboard', description: 'Tema, warna, dan layout dashboard', icon: '◐' },
+    { page: 'Kasir', label: 'Buka POS / Kasir', description: 'Catat penjualan dan transaksi', icon: '＋' },
+    { page: 'Stok', label: 'Stok Unit', description: 'Lihat dan kelola stok barang atau unit', icon: '▦' },
+    { page: 'User Management', label: 'Pengguna & Tim', description: 'Anggota, undangan, dan peran tim', icon: '♧' },
+    { page: 'Pengelolaan Akses', label: 'Hak Akses', description: 'Izin dan akses pengguna', icon: '♙' },
+    { page: 'Cabang', label: 'Cabang & Lokasi', description: 'Kelola lokasi usaha', icon: '⌖' },
+    { page: 'Aktivasi', label: 'Paket & Aktivasi', description: 'Status dan paket workspace', icon: '◷' },
+  ].filter(({ page }) => menus.some(([label]) => label === page));
   const heading = activePage === 'SPK Saya' || activePage === 'Pengajuan' ? 'Semua SPK' : activePage;
   const visibleSpks = activePage === 'Approval'
     ? spks.filter((item) => item.status === 'APPROVAL SVP')
@@ -2664,24 +2740,32 @@ function App() {
   }, [activeUser.id, businessType, demoMode, isAuthenticated, workspaceModules]);
 
   useEffect(() => {
-    if (!accountMenuOpen && !accountProfileOpen) return undefined;
+    if (!accountMenuOpen && !accountProfileOpen && !workspaceMenuOpen) return undefined;
     const closeOnEscape = (event) => {
       if (event.key !== 'Escape') return;
       setAccountMenuOpen(false);
       setAccountProfileOpen(false);
+      setWorkspaceMenuOpen(false);
     };
     const closeMenuOutside = (event) => {
       if (event.target instanceof Element && !event.target.closest('.account-menu-shell')) {
         setAccountMenuOpen(false);
       }
     };
+    const closeWorkspaceMenuOutside = (event) => {
+      if (event.target instanceof Element && !event.target.closest('.workspace-menu-shell')) {
+        setWorkspaceMenuOpen(false);
+      }
+    };
     document.addEventListener('keydown', closeOnEscape);
     if (accountMenuOpen) document.addEventListener('pointerdown', closeMenuOutside);
+    if (workspaceMenuOpen) document.addEventListener('pointerdown', closeWorkspaceMenuOutside);
     return () => {
       document.removeEventListener('keydown', closeOnEscape);
       document.removeEventListener('pointerdown', closeMenuOutside);
+      document.removeEventListener('pointerdown', closeWorkspaceMenuOutside);
     };
-  }, [accountMenuOpen, accountProfileOpen]);
+  }, [accountMenuOpen, accountProfileOpen, workspaceMenuOpen]);
 
   useEffect(() => {
     if (!isAuthenticated || demoMode || !['OWNER', 'SUPER ADMIN'].includes(activeUser.role)) return undefined;
@@ -2725,6 +2809,21 @@ function App() {
         if (!response.ok) throw new Error(await getApiError(response, 'Data aktivasi tidak dapat dimuat.'));
         const data = await response.json();
         if (cancelled) return;
+        const loadThemeState = (activeSettings, draft, previous, history, type) => {
+          const normalizedActive = normalizeThemeSettings(activeSettings, type);
+          setThemeSettings(normalizedActive);
+          if (themeLoadedUserRef.current !== activeUser.id || !themeDraftDirtyRef.current) {
+            setThemeDraft(normalizeDashboardThemeSettings(draft || normalizedActive));
+            setThemeDraftDirty(false);
+            themeDraftDirtyRef.current = false;
+          }
+          setPreviousDashboardTheme(previous
+            ? normalizeDashboardThemeSettings(previous)
+            : null);
+          setDashboardThemeHistory(Array.isArray(history) ? history : []);
+          themeLoadedRef.current = true;
+          themeLoadedUserRef.current = activeUser.id;
+        };
         if (activeUser.role === 'PLATFORM_OWNER') {
           setPlatformData(data);
           setPlatformBranchLimits(Object.fromEntries((data.businesses || [])
@@ -2732,11 +2831,21 @@ function App() {
         }
         else if (activeUser.role === 'OWNER') {
           setBillingData(data);
-          setThemeSettings(normalizeThemeSettings(data.business.themeSettings, data.business.type));
-          themeLoadedRef.current = true;
+          loadThemeState(
+            data.business.themeSettings,
+            data.dashboardDraft,
+            data.previousDashboardTheme,
+            data.dashboardThemeHistory,
+            data.business.type,
+          );
         } else {
-          setThemeSettings(normalizeThemeSettings(data.themeSettings, data.businessType));
-          themeLoadedRef.current = true;
+          loadThemeState(
+            data.themeSettings,
+            data.dashboardDraft,
+            data.previousDashboardTheme,
+            data.dashboardThemeHistory,
+            data.businessType,
+          );
         }
         setBillingError('');
       } catch (error) {
@@ -2978,16 +3087,21 @@ function App() {
   }, [activePage, activeUser.id, activeUser.permissions, isAuthenticated, needsBusinessSetup, workspaceModules]);
 
   useEffect(() => {
-    if (!themeSettings.faviconUrl) return undefined;
+    const faviconUrl = themeSettings.dashboardFaviconUrl || themeSettings.faviconUrl;
+    if (!faviconUrl) return undefined;
     let favicon = document.querySelector('link[rel~="icon"]');
     if (!favicon) {
       favicon = document.createElement('link');
       favicon.rel = 'icon';
       document.head.appendChild(favicon);
     }
-    favicon.href = themeSettings.faviconUrl;
+    favicon.href = faviconUrl;
     return undefined;
-  }, [themeSettings.faviconUrl]);
+  }, [themeSettings.dashboardFaviconUrl, themeSettings.faviconUrl]);
+
+  useEffect(() => {
+    if (themeSettings.sidebarMode !== 'collapsible') setSidebarCollapsed(false);
+  }, [themeSettings.sidebarMode]);
 
   const beginPackageCheckout = async () => {
     setBillingError('');
@@ -3060,6 +3174,45 @@ function App() {
       onUploaded?.(url);
     };
     reader.onerror = () => setUploadError('Pratinjau gambar tidak dapat dibaca.');
+    reader.readAsDataURL(file);
+  };
+
+  const uploadDashboardThemeAsset = async (event, assetType) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setThemeError('');
+    const extension = file.name.split('.').pop().toLowerCase();
+    const acceptedTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/x-icon'];
+    const acceptedExtensions = ['png', 'jpg', 'jpeg', 'webp', 'ico'];
+    if ((!acceptedTypes.includes(file.type) && !acceptedExtensions.includes(extension))
+      || file.size > 2 * 1024 * 1024) {
+      setThemeError('Pilih PNG, JPG, WebP, atau ICO berukuran maksimal 2 MB.');
+      event.target.value = '';
+      return;
+    }
+    const key = assetType === 'dashboardLogo' ? 'dashboardLogoUrl' : 'dashboardFaviconUrl';
+    const saveAssetToDraft = (url) => {
+      themeDraftDirtyRef.current = true;
+      setThemeDraft((current) => ({ ...current, [key]: url }));
+      setThemeDraftDirty(true);
+    };
+    if (isAuthenticated) {
+      const upload = new FormData();
+      upload.append('assetType', assetType === 'dashboardLogo' ? 'logo' : 'favicon');
+      upload.append('file', file);
+      try {
+        const response = await fetch('/api/workspace/assets', { method: 'POST', body: upload });
+        if (!response.ok) throw new Error(await getApiError(response, 'Aset dashboard tidak dapat diunggah.'));
+        const result = await response.json();
+        saveAssetToDraft(result.url);
+      } catch (error) {
+        setThemeError(error.message);
+      }
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => saveAssetToDraft(String(reader.result));
+    reader.onerror = () => setThemeError('Pratinjau gambar tidak dapat dibaca.');
     reader.readAsDataURL(file);
   };
 
@@ -3201,7 +3354,7 @@ function App() {
       });
       if (!response.ok) throw new Error(await getApiError(response, 'Pengaturan tema tidak dapat disimpan.'));
       const result = await response.json();
-      setThemeSettings(result.themeSettings);
+      setThemeSettings(normalizeThemeSettings(result.themeSettings, businessType));
       setThemeNotice(successMessage);
     } catch (error) {
       setThemeError(error.message);
@@ -3210,31 +3363,164 @@ function App() {
     }
   };
 
-  useEffect(() => {
-    if (!isAuthenticated
-      || demoMode
-      || !themeLoadedRef.current
-      || !canManageTheme) return undefined;
-    const timer = window.setTimeout(async () => {
-      try {
-        const response = await fetch('/api/workspace/theme', {
+  const saveThemeDraft = async () => {
+    setThemeError('');
+    setThemeNotice('');
+    setThemeSaving(true);
+    try {
+      if (!isAuthenticated) {
+        if (!demoMode) throw new Error('Masuk ke workspace untuk menyimpan draft tema.');
+        localStorage.setItem('ku-demo-theme-state:dealer_motor', JSON.stringify({
+          draft: themeDraft,
+          previous: previousDashboardTheme,
+          history: dashboardThemeHistory,
+        }));
+        setThemeNotice('Draft tema berhasil disimpan pada browser ini.');
+      } else {
+        const response = await fetch('/api/workspace/theme/draft', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(themeSettings),
+          body: JSON.stringify({ dashboardDraft: themeDraft }),
         });
-        if (!response.ok) throw new Error(await getApiError(response, 'Tema saat ini tidak dapat disimpan.'));
+        if (!response.ok) throw new Error(await getApiError(response, 'Draft tema tidak dapat disimpan.'));
         const result = await response.json();
-        setThemeSettings((current) => (
-          JSON.stringify(current) === JSON.stringify(result.themeSettings)
-            ? current
-            : normalizeThemeSettings(result.themeSettings, businessType)
-        ));
-      } catch (error) {
-        setThemeError(error.message);
+        setPreviousDashboardTheme(result.previousDashboardTheme
+          ? normalizeDashboardThemeSettings(result.previousDashboardTheme)
+          : null);
+        setDashboardThemeHistory(Array.isArray(result.dashboardThemeHistory) ? result.dashboardThemeHistory : []);
+        setThemeNotice('Draft tema berhasil disimpan untuk perusahaan ini.');
       }
-    }, 500);
-    return () => window.clearTimeout(timer);
-  }, [themeSettings, isAuthenticated, demoMode, canManageTheme, businessType]);
+      themeDraftDirtyRef.current = false;
+      setThemeDraftDirty(false);
+    } catch (error) {
+      setThemeError(error.message);
+    } finally {
+      setThemeSaving(false);
+    }
+  };
+
+  const applyThemeDraft = async () => {
+    setThemeError('');
+    setThemeNotice('');
+    setThemeSaving(true);
+    try {
+      if (!isAuthenticated) {
+        if (!demoMode) throw new Error('Masuk ke workspace untuk menerapkan tema.');
+        const previous = normalizeDashboardThemeSettings(themeSettings);
+        const appliedAt = new Date().toISOString();
+        const history = [
+          { settings: previous, appliedAt },
+          ...dashboardThemeHistory,
+        ].slice(0, 10);
+        const active = normalizeThemeSettings({ ...themeSettings, ...themeDraft }, businessType);
+        setThemeSettings(active);
+        setPreviousDashboardTheme(previous);
+        setDashboardThemeHistory(history);
+        setThemeDraft(normalizeDashboardThemeSettings(active));
+        localStorage.setItem('ku-demo-theme:dealer_motor', JSON.stringify(active));
+        localStorage.setItem('ku-demo-theme-state:dealer_motor', JSON.stringify({
+          draft: active,
+          previous,
+          history,
+        }));
+      } else {
+        const response = await fetch('/api/workspace/theme/apply', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dashboardDraft: themeDraft }),
+        });
+        if (!response.ok) throw new Error(await getApiError(response, 'Tema dashboard tidak dapat diterapkan.'));
+        const result = await response.json();
+        setThemeSettings(normalizeThemeSettings(result.themeSettings, businessType));
+        setThemeDraft(normalizeDashboardThemeSettings(result.dashboardDraft || result.themeSettings));
+        setPreviousDashboardTheme(result.previousDashboardTheme
+          ? normalizeDashboardThemeSettings(result.previousDashboardTheme)
+          : null);
+        setDashboardThemeHistory(Array.isArray(result.dashboardThemeHistory) ? result.dashboardThemeHistory : []);
+      }
+      themeDraftDirtyRef.current = false;
+      setThemeDraftDirty(false);
+      setThemeNotice('Tema berhasil diterapkan pada dashboard perusahaan ini.');
+    } catch (error) {
+      setThemeError(error.message);
+    } finally {
+      setThemeSaving(false);
+    }
+  };
+
+  const discardThemeDraft = async () => {
+    setThemeError('');
+    setThemeNotice('');
+    setThemeSaving(true);
+    try {
+      if (!isAuthenticated) {
+        if (!demoMode) throw new Error('Masuk ke workspace untuk membatalkan draft.');
+        const draft = normalizeDashboardThemeSettings(themeSettings);
+        setThemeDraft(draft);
+        localStorage.setItem('ku-demo-theme-state:dealer_motor', JSON.stringify({
+          draft,
+          previous: previousDashboardTheme,
+          history: dashboardThemeHistory,
+        }));
+      } else {
+        const response = await fetch('/api/workspace/theme/draft', { method: 'DELETE' });
+        if (!response.ok) throw new Error(await getApiError(response, 'Perubahan draft tidak dapat dibatalkan.'));
+        const result = await response.json();
+        setThemeDraft(normalizeDashboardThemeSettings(result.dashboardDraft || themeSettings));
+      }
+      themeDraftDirtyRef.current = false;
+      setThemeDraftDirty(false);
+      setThemeNotice('Draft dikembalikan ke tema yang sedang aktif.');
+    } catch (error) {
+      setThemeError(error.message);
+    } finally {
+      setThemeSaving(false);
+    }
+  };
+
+  const restorePreviousTheme = async () => {
+    setThemeError('');
+    setThemeNotice('');
+    setThemeSaving(true);
+    try {
+      if (!isAuthenticated) {
+        if (!demoMode) throw new Error('Masuk ke workspace untuk memulihkan tema.');
+        if (!previousDashboardTheme) throw new Error('Belum ada tema sebelumnya yang dapat dipulihkan.');
+        const active = normalizeDashboardThemeSettings(themeSettings);
+        const restored = normalizeThemeSettings({ ...themeSettings, ...previousDashboardTheme }, businessType);
+        const history = [{ settings: active, appliedAt: new Date().toISOString() }, ...dashboardThemeHistory].slice(0, 10);
+        setThemeSettings(restored);
+        setThemeDraft(normalizeDashboardThemeSettings(restored));
+        setPreviousDashboardTheme(active);
+        setDashboardThemeHistory(history);
+        localStorage.setItem('ku-demo-theme:dealer_motor', JSON.stringify(restored));
+        localStorage.setItem('ku-demo-theme-state:dealer_motor', JSON.stringify({
+          draft: restored,
+          previous: active,
+          history,
+        }));
+      } else {
+        const response = await fetch('/api/workspace/theme/restore', { method: 'POST' });
+        if (!response.ok) throw new Error(await getApiError(response, 'Tema sebelumnya tidak dapat dipulihkan.'));
+        const result = await response.json();
+        setThemeSettings(normalizeThemeSettings(result.themeSettings, businessType));
+        setThemeDraft(normalizeDashboardThemeSettings(result.dashboardDraft || result.themeSettings));
+        setPreviousDashboardTheme(result.previousDashboardTheme
+          ? normalizeDashboardThemeSettings(result.previousDashboardTheme)
+          : null);
+        setDashboardThemeHistory(Array.isArray(result.dashboardThemeHistory) ? result.dashboardThemeHistory : []);
+      }
+      themeDraftDirtyRef.current = false;
+      setThemeDraftDirty(false);
+      setThemeNotice('Tema sebelumnya berhasil dipulihkan dan diterapkan.');
+    } catch (error) {
+      setThemeError(error.message);
+    } finally {
+      setThemeSaving(false);
+    }
+  };
+
+  const resetThemeDraft = () => updateThemeDraft({ ...defaultDashboardThemeSettings });
 
   const logoutAccount = async () => {
     setLogoutError('');
@@ -3294,11 +3580,23 @@ function App() {
         setActivePage('Semua Usaha');
         setWorkspaceBranches([{ id: 'preview-branch-primary', name: 'Cabang Utama', isPrimary: true }]);
         try {
-          setThemeSettings(normalizeThemeSettings(
+          const activeSettings = normalizeThemeSettings(
             JSON.parse(localStorage.getItem('ku-demo-theme:dealer_motor') || '{}'),
-          ));
+          );
+          const savedState = JSON.parse(localStorage.getItem('ku-demo-theme-state:dealer_motor') || '{}');
+          setThemeSettings(activeSettings);
+          setThemeDraft(normalizeDashboardThemeSettings(savedState.draft || activeSettings));
+          setPreviousDashboardTheme(savedState.previous
+            ? normalizeDashboardThemeSettings(savedState.previous)
+            : null);
+          setDashboardThemeHistory(Array.isArray(savedState.history) ? savedState.history : []);
+          themeDraftDirtyRef.current = false;
+          setThemeDraftDirty(false);
         } catch (error) {
           setThemeSettings(defaultThemeSettings);
+          setThemeDraft(defaultDashboardThemeSettings);
+          setPreviousDashboardTheme(null);
+          setDashboardThemeHistory([]);
           setThemeError(`Pengaturan tema demo tidak dapat dibaca: ${error.message}`);
         }
         setPlatformData({
@@ -3331,15 +3629,32 @@ function App() {
   return (
     <div
       className="app-shell"
-      data-dashboard-mode={activeThemeColors.mode}
+      data-dashboard-mode={activeDashboardMode}
+      data-layout={themeSettings.layout}
+      data-density={themeSettings.density}
       data-sidebar={themeSettings.sidebarMode}
+      data-sidebar-collapsed={sidebarCollapsed}
+      data-sidebar-content={themeSettings.sidebarContent}
+      data-sidebar-icons={themeSettings.sidebarIcons}
+      data-logo-position={themeSettings.logoPosition}
+      data-header-style={themeSettings.headerStyle}
+      data-header-shadow={themeSettings.headerShadow}
+      data-header-sticky={themeSettings.headerSticky}
+      data-card-style={themeSettings.cardStyle}
+      data-button-style={themeSettings.buttonStyle}
+      data-card-size={themeSettings.cardSize}
+      data-card-shadow={themeSettings.cardShadow}
+      data-card-border={themeSettings.cardBorder}
+      data-button-outline={themeSettings.buttonOutline}
+      data-notifications={themeSettings.showNotifications}
+      data-user-profile={themeSettings.showUserProfile}
       data-theme={themeSettings.themeId}
-      style={{ '--theme-primary': activeThemeColors.primary, '--theme-secondary': activeThemeColors.secondary }}
+      style={activeThemeStyle}
     >
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark">{themeSettings.logoUrl
-            ? <img alt={`${workspaceName} logo`} src={themeSettings.logoUrl} />
+          <div className="brand-mark">{themeSettings.dashboardLogoUrl || themeSettings.logoUrl
+            ? <img alt={`${workspaceName} logo`} src={themeSettings.dashboardLogoUrl || themeSettings.logoUrl} />
             : <span className="brand-initials">{initialsFor(workspaceName)}</span>}</div>
           <div className="brand-copy">
             <strong>{workspaceName}</strong>
@@ -3348,18 +3663,43 @@ function App() {
         </div>
 
         <div className="workspace-label">WORKSPACE</div>
-        {['OWNER', 'SUPER ADMIN'].includes(activeUser.role)
-          ? <button
-            aria-label="Buka pengaturan workspace"
-            className="dealer-switch"
-            onClick={() => openPage('Struktur Workspace')}
-            title="Buka pengaturan workspace"
-            type="button"
-          >
-            <span className="dealer-icon">{workspaceName.charAt(0).toUpperCase()}</span>
-            <span className="dealer-copy"><strong>{workspaceName}</strong><small>Workspace aktif</small></span>
-            <span className="switch-chevron">⌄</span>
-          </button>
+        {activeUser.role !== 'PLATFORM_OWNER'
+          ? <div className="workspace-menu-shell">
+            <button
+              aria-controls="workspace-settings-menu"
+              aria-expanded={workspaceMenuOpen}
+              aria-haspopup="menu"
+              aria-label="Buka pengaturan workspace"
+              className="dealer-switch"
+              onClick={() => setWorkspaceMenuOpen((isOpen) => !isOpen)}
+              title="Buka menu workspace"
+              type="button"
+            >
+              <span className="dealer-icon">{workspaceName.charAt(0).toUpperCase()}</span>
+              <span className="dealer-copy"><strong>{workspaceName}</strong><small>Workspace aktif</small></span>
+              <span className="switch-chevron">{workspaceMenuOpen ? '⌃' : '⌄'}</span>
+            </button>
+            {workspaceMenuOpen && <div aria-label="Menu pengaturan workspace" className="workspace-settings-menu" id="workspace-settings-menu" role="menu">
+              <div className="workspace-settings-menu-heading">
+                <span>PENGATURAN WORKSPACE</span>
+                <strong>{workspaceName}</strong>
+                <small>Pilih bagian workspace yang ingin Anda kelola.</small>
+              </div>
+              <div className="workspace-settings-menu-items">
+                {workspaceQuickLinks.map((item) => <button
+                  className={`workspace-settings-menu-item${activePage === item.page ? ' active' : ''}`}
+                  key={item.page}
+                  onClick={() => openPage(item.page)}
+                  role="menuitem"
+                  type="button"
+                >
+                  <span className="workspace-settings-menu-icon" aria-hidden="true">{item.icon}</span>
+                  <span><strong>{item.label}</strong><small>{item.description}</small></span>
+                  <span className="workspace-settings-menu-arrow" aria-hidden="true">→</span>
+                </button>)}
+              </div>
+            </div>}
+          </div>
           : <div className="dealer-switch">
             <span className="dealer-icon">{workspaceName.charAt(0).toUpperCase()}</span>
             <span className="dealer-copy"><strong>{workspaceName}</strong><small>Workspace aktif</small></span>
@@ -3404,6 +3744,19 @@ function App() {
 
       <main className="main-area">
         <header className="topbar">
+          {themeSettings.logoPosition === 'header' && <div className="topbar-brand">
+            <span>{themeSettings.dashboardLogoUrl || themeSettings.logoUrl
+              ? <img alt="" src={themeSettings.dashboardLogoUrl || themeSettings.logoUrl} />
+              : initialsFor(workspaceName)}</span>
+            <strong>{workspaceName}</strong>
+          </div>}
+          {themeSettings.sidebarMode === 'collapsible' && <button
+            aria-label={sidebarCollapsed ? 'Perluas sidebar' : 'Ciutkan sidebar'}
+            aria-pressed={sidebarCollapsed}
+            className="sidebar-collapse-toggle"
+            onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
+            type="button"
+          >{sidebarCollapsed ? '☰' : '‹'}</button>}
           <div className="breadcrumbs"><span>{activeUser.role === 'PLATFORM_OWNER' ? 'KELOLAUSAHA.STORE' : workspaceName}</span><span className="crumb-divider">/</span><strong>{heading}</strong></div>
           <div className="topbar-actions">
             {!isAuthenticated && demoMode && <button className="preview-exit" onClick={() => setDemoMode(false)} type="button">← Kembali ke website</button>}
@@ -3430,7 +3783,7 @@ function App() {
                 {users.map((user) => <option disabled={!user.active} key={user.id} value={user.id}>{user.name} · {user.role}{user.active ? '' : ' (nonaktif)'}</option>)}
               </select>
             </label>}
-            <button
+            {themeSettings.showNotifications && <button
               aria-label={canApproveSpk
                 ? `Notifikasi persetujuan${pendingApprovalCount ? `, ${pendingApprovalCount} menunggu` : ''}`
                 : `Notifikasi${unreadBillingNotifications.length ? `, ${unreadBillingNotifications.length} belum dibaca` : ''}`}
@@ -3444,7 +3797,7 @@ function App() {
               {canApproveSpk
                 ? pendingApprovalCount > 0 && <span className="notification-count">{pendingApprovalCount}</span>
                 : unreadBillingNotifications.length > 0 && <span className="notification-dot" />}
-            </button>
+            </button>}
             <div className="account-menu-shell">
               <button
                 aria-controls="account-menu"
@@ -3669,47 +4022,25 @@ function App() {
             uploading={businessProfileUploading}
           />
         ) : activePage === 'Tampilan Dashboard' ? (
-          <section className="content theme-settings-page">
-            <div className="page-heading"><div><div className="eyebrow">PENGATURAN <span>/</span> IDENTITAS USAHA</div><h1>Tampilan Dashboard</h1><p>Sesuaikan identitas visual workspace {workspaceName}. Tema tidak mengubah data, modul, atau hak akses.</p></div></div>
-            {themeNotice && <div className="notice" role="status">{themeNotice}</div>}
-            {themeError && <div className="notice error-notice" role="alert">{themeError}</div>}
-            {demoMode && <div className="notice">Pratinjau demo — pengaturan disimpan lokal dan tidak mengubah data perusahaan.</div>}
-            {!canManageTheme && <div className="notice error-notice" role="alert">Hanya Owner dan Super Admin dengan izin tampilan dashboard yang dapat mengubah tema.</div>}
-            <section className="theme-settings-card">
-              <div className="table-heading"><div><h2>Pilih tema dashboard</h2><p>Crimson Momentum menjadi tema default. Pilihan berubah secara otomatis dan tersimpan untuk usaha ini.</p></div></div>
-              <div className="theme-choice-grid">
-                {dashboardThemes.map((theme, index) => <button aria-pressed={themeSettings.themeId === theme.id} className={`theme-choice ${themeSettings.themeId === theme.id ? 'selected' : ''}`} disabled={!canManageTheme} key={theme.id} onClick={() => setThemeSettings((current) => ({ ...current, themeId: theme.id, mode: theme.mode }))} type="button">
-                  <span className="theme-choice-preview" style={{ '--swatch-primary': theme.primary, '--swatch-support': theme.secondary }}><i /><i /><i /><b /></span>
-                  <span className="theme-choice-label"><small>{`${index + 1}`.padStart(2, '0')}</small><strong>{theme.name}</strong></span>
-                </button>)}
-              </div>
-            </section>
-            <div className="theme-options-grid">
-              <section className="theme-settings-card">
-                <div className="table-heading"><div><h2>Warna dashboard</h2><p>Atur warna utama dan pendukung.</p></div></div>
-                <div className="theme-color-fields">
-                  <label className="theme-color-field"><span>Warna utama</span><input aria-label="Warna utama" disabled={!canManageTheme} onChange={(event) => setThemeSettings((current) => ({ ...current, customPrimary: event.target.value }))} type="color" value={themeSettings.customPrimary || activeThemeColors.primary} /></label>
-                  <label className="theme-color-field"><span>Warna pendukung</span><input aria-label="Warna pendukung" disabled={!canManageTheme} onChange={(event) => setThemeSettings((current) => ({ ...current, customSecondary: event.target.value }))} type="color" value={themeSettings.customSecondary || activeThemeColors.secondary} /></label>
-                  <label className="field"><span>Mode tampilan</span><select disabled={!canManageTheme} onChange={(event) => setThemeSettings((current) => ({ ...current, mode: event.target.value }))} value={themeSettings.mode}><option value="light">Terang</option><option value="dark">Gelap</option></select></label>
-                </div>
-              </section>
-              <section className="theme-settings-card">
-                <div className="table-heading"><div><h2>Komponen dashboard</h2><p>Atur navigasi dan kartu ringkasan.</p></div></div>
-                <div className="theme-control-fields">
-                  <label className="field"><span>Tampilan sidebar</span><select disabled={!canManageTheme} onChange={(event) => setThemeSettings((current) => ({ ...current, sidebarMode: event.target.value }))} value={themeSettings.sidebarMode}><option value="wide">Lebar</option><option value="mini">Mini</option></select></label>
-                  <label className="field"><span>Gaya kartu statistik</span><select disabled={!canManageTheme} onChange={(event) => setThemeSettings((current) => ({ ...current, statCardStyle: event.target.value }))} value={themeSettings.statCardStyle}><option value="shadow">Bayangan lembut</option><option value="border">Garis tegas</option><option value="soft">Latar warna</option></select></label>
-                </div>
-              </section>
-            </div>
-            <section className="theme-settings-card theme-assets-card">
-              <div className="table-heading"><div><h2>Logo dan favicon</h2><p>Gunakan PNG, JPG, WebP, atau ICO maksimal 2 MB.</p></div></div>
-              <div className="theme-assets-grid">
-                <label className="theme-upload"><span className="theme-asset-preview">{themeSettings.logoUrl ? <img alt="Pratinjau logo usaha" src={themeSettings.logoUrl} /> : 'KU'}</span><span><strong>Logo perusahaan</strong><small>Ditampilkan di navigasi dashboard.</small></span><input accept="image/png,image/jpeg,image/webp,image/x-icon" aria-label="Unggah logo perusahaan" disabled={!canManageTheme} onChange={(event) => changeThemeAsset(event, 'logo')} type="file" /></label>
-                <label className="theme-upload"><span className="theme-asset-preview favicon-preview">{themeSettings.faviconUrl ? <img alt="Pratinjau favicon" src={themeSettings.faviconUrl} /> : 'F'}</span><span><strong>Favicon</strong><small>Ikon tab browser workspace.</small></span><input accept="image/png,image/jpeg,image/webp,image/x-icon" aria-label="Unggah favicon" disabled={!canManageTheme} onChange={(event) => changeThemeAsset(event, 'favicon')} type="file" /></label>
-              </div>
-            </section>
-            <div className="theme-save-row"><span>Pengaturan tersimpan terpisah untuk setiap perusahaan.</span><button className="button button-primary" disabled={themeSaving || !canManageTheme} onClick={saveTheme} type="button">{themeSaving ? 'Menyimpan…' : 'Simpan tampilan'} <span>→</span></button></div>
-          </section>
+          <DashboardThemeSettings
+            activeSettings={themeSettings}
+            businessName={workspaceName}
+            canManage={canManageTheme}
+            draftSettings={themeDraft}
+            draftDirty={themeDraftDirty}
+            error={themeError}
+            history={dashboardThemeHistory}
+            notice={demoMode ? `${themeNotice || 'Pratinjau demo — perubahan disimpan lokal dan tidak mengubah data perusahaan.'}` : themeNotice}
+            onApply={applyThemeDraft}
+            onAssetUpload={uploadDashboardThemeAsset}
+            onChange={updateThemeDraft}
+            onDiscard={discardThemeDraft}
+            onReset={resetThemeDraft}
+            onRestore={restorePreviousTheme}
+            onSaveDraft={saveThemeDraft}
+            previousSettings={previousDashboardTheme}
+            saving={themeSaving}
+          />
         ) : activePage === 'Pengaturan Nota' ? (
           <section className="content theme-settings-page receipt-settings-page">
             <div className="page-heading"><div><div className="eyebrow">PENGATURAN <span>/</span> NOTA DIGITAL</div><h1>Studio Nota</h1><p>Atur tampilan nota untuk workspace {workspaceName} · {businessTypes[businessType]?.label || 'Usaha'}.</p></div></div>
